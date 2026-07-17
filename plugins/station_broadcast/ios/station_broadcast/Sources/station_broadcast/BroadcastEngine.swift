@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import HaishinKit
+import Photos
 import SRTHaishinKit
 import UIKit
 #if canImport(RTMPHaishinKit)
@@ -36,17 +37,34 @@ final class BroadcastEngine {
     private var talkback: TalkbackAudioPlayer?
     private var orientationObserver: NSObjectProtocol?
 
+    // Recording support
+    private var recordingStream: StreamRecorder?
+    private var recordingFilePath: String?
+    private var recordingFileURL: URL?
+    private var recordingEnabled = false
+    private var recordingSettings: RecordingConfig?
+
     /// Called with (state, message) on connection lifecycle changes.
     var onEvent: ((String, String?) -> Void)?
     /// Called with a flat stats map roughly once per second while live.
     var onStats: (([String: Any?]) -> Void)?
     /// Called with 256-bin luminance histogram data (~15 fps).
     var onHistogram: (([Int]) -> Void)?
+    /// Called with recording events: recordingStarted, recordingStopped, recordingError
+    var onRecording: ((String, String?) -> Void)?
 
     fileprivate let luminanceAnalyzer = LuminanceAnalyzer()
 
     private var pendingVideoSettings: VideoCodecSettings?
     private var pendingAudioSettings: AudioCodecSettings?
+
+    struct RecordingConfig {
+        let enabled: Bool
+        let resolution: String
+        let bitrateBps: Int
+        let fps: Int
+        let codec: String
+    }
 
     private func bestCamera(position: AVCaptureDevice.Position) -> AVCaptureDevice? {
         let camera: AVCaptureDevice?
@@ -77,6 +95,13 @@ final class BroadcastEngine {
         let videoBitrate = (args["videoBitrateBps"] as? NSNumber)?.intValue ?? 3_000_000
         let audioBitrate = (args["audioBitrateBps"] as? NSNumber)?.intValue ?? 128_000
 
+        // Extract recording settings
+        let recordingEnabled = (args["recordingEnabled"] as? NSNumber)?.boolValue ?? false
+        let recordingResolution = (args["recordingResolution"] as? String) ?? "p1080"
+        let recordingBitrateBps = (args["recordingBitrateBps"] as? NSNumber)?.intValue ?? 6_000_000
+        let recordingFps = (args["recordingFps"] as? NSNumber)?.intValue ?? 25
+        let recordingCodec = (args["recordingCodec"] as? String) ?? "h264"
+
         var videoSettings = VideoCodecSettings()
         videoSettings.videoSize = CGSize(width: width, height: height)
         videoSettings.bitRate = videoBitrate
@@ -86,6 +111,18 @@ final class BroadcastEngine {
         var audioSettings = AudioCodecSettings()
         audioSettings.bitRate = audioBitrate
         pendingAudioSettings = audioSettings
+
+        // Store recording config
+        if recordingEnabled {
+            self.recordingEnabled = recordingEnabled
+            self.recordingSettings = RecordingConfig(
+                enabled: recordingEnabled,
+                resolution: recordingResolution,
+                bitrateBps: recordingBitrateBps,
+                fps: recordingFps,
+                codec: recordingCodec
+            )
+        }
 
         if !isMixerRunning {
             let camera = bestCamera(position: currentPosition)
@@ -165,6 +202,12 @@ final class BroadcastEngine {
             try? await stream.setAudioSettings(audioSettings)
         }
         await mixer.addOutput(stream)
+
+        // Attach recorder if enabled
+        if recordingEnabled, let config = recordingSettings {
+            await attachRecorder(to: stream, config: config)
+        }
+
         try await connection.connect(components.url)
         await stream.publish()
         srtConnection = connection
@@ -187,6 +230,12 @@ final class BroadcastEngine {
             try? await stream.setAudioSettings(audioSettings)
         }
         await mixer.addOutput(stream)
+
+        // Attach recorder if enabled
+        if recordingEnabled, let config = recordingSettings {
+            await attachRecorder(to: stream, config: config)
+        }
+
         _ = try await connection.connect(url)
         _ = try await stream.publish(key)
         rtmpConnection = connection
@@ -202,6 +251,31 @@ final class BroadcastEngine {
         isStreamingRequested = false
         statsTimer?.invalidate()
         statsTimer = nil
+
+        // Stop recording if active
+        if let recorder = recordingStream {
+            do {
+                try await recorder.stopRecording()
+                onRecording?("recordingStopped", recordingFilePath)
+                dlog("Recording stopped: \(recordingFilePath ?? "unknown")")
+
+                // Save to Photo Library asynchronously if file exists
+                if let fileURL = recordingFileURL {
+                    Task {
+                        await saveVideoToPhotoLibrary(fileURL)
+                    }
+                }
+
+                recordingFilePath = nil
+                recordingFileURL = nil
+            } catch {
+                onRecording?("recordingError", error.localizedDescription)
+                dlog("Recording stop error: \(error)")
+                recordingFileURL = nil
+            }
+            recordingStream = nil
+        }
+
         if let stream = srtStream {
             await mixer.removeOutput(stream)
             await stream.close()
@@ -625,6 +699,145 @@ final class BroadcastEngine {
         case .bluetoothHFP, .bluetoothLE: return "bluetooth"
         case .usbAudio: return "usb"
         default: return "unknown"
+        }
+    }
+
+    // MARK: - Recording Support
+
+    private func resolveRecordingDimensions(_ resolution: String) -> (width: UInt32, height: UInt32) {
+        switch resolution {
+        case "p720":
+            return (1280, 720)
+        case "p1080":
+            return (1920, 1080)
+        case "p1440":
+            return (2560, 1440)
+        default:
+            return (1920, 1080)
+        }
+    }
+
+    private func resolveVideoCodec(_ codec: String) -> AVVideoCodecType {
+        switch codec {
+        case "hevc":
+            return .hevc
+        case "h264":
+            return .h264
+        default:
+            return .h264
+        }
+    }
+
+    private func attachRecorder(to stream: some StreamConvertible, config: RecordingConfig) async {
+        let recorder = StreamRecorder()
+        let dimensions = resolveRecordingDimensions(config.resolution)
+        let codecType = resolveVideoCodec(config.codec)
+
+        // Configure recording settings
+        var recordingSettings: [AVMediaType: [String: any Sendable]] = [
+            .audio: [
+                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                AVSampleRateKey: 0,        // Auto from input
+                AVNumberOfChannelsKey: 0   // Auto from input
+            ],
+            .video: [
+                AVVideoCodecKey: codecType,
+                AVVideoHeightKey: Int(dimensions.height),
+                AVVideoWidthKey: Int(dimensions.width),
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: config.bitrateBps,
+                    AVVideoExpectedSourceFrameRateKey: config.fps,
+                    AVVideoMaxKeyFrameIntervalKey: config.fps  // Keyframe every 1 second
+                ]
+            ]
+        ]
+
+        // Create temp directory for recording (will move to Photos Library after)
+        let fileManager = FileManager.default
+        let tempDir = fileManager.temporaryDirectory
+        let recordingDir = tempDir.appendingPathComponent("StationCastRecordings", isDirectory: true)
+
+        do {
+            try fileManager.createDirectory(at: recordingDir, withIntermediateDirectories: true)
+
+            // Generate filename with timestamp
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+            let timestamp = dateFormatter.string(from: Date())
+            let filename = "stationcast_\(timestamp).mp4"
+            let recordingURL = recordingDir.appendingPathComponent(filename)
+
+            // Start recording with configured settings
+            try await recorder.startRecording(recordingURL, settings: recordingSettings)
+            recordingFilePath = recordingURL.absoluteString
+            recordingFileURL = recordingURL
+            recordingStream = recorder
+
+            // Attach recorder to stream
+            await stream.addOutput(recorder)
+
+            // Send event to Flutter
+            onRecording?("recordingStarted", recordingFilePath)
+            dlog("Recording started: \(recordingURL.path) (\(dimensions.width)x\(dimensions.height) \(config.fps)fps \(config.bitrateBps / 1_000_000)Mbps)")
+
+        } catch {
+            onRecording?("recordingError", error.localizedDescription)
+            dlog("Recording setup error: \(error)")
+        }
+    }
+
+    // MARK: - Photo Library Integration
+
+    private func saveVideoToPhotoLibrary(_ fileURL: URL) async {
+        // Step 1: Request permissions
+        let authStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        if authStatus == .notDetermined {
+            let newStatus = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+            guard newStatus == .authorized else {
+                dlog("Photo library permission denied")
+                return
+            }
+        } else if authStatus == .denied || authStatus == .restricted {
+            dlog("Photo library access denied or restricted")
+            return
+        }
+
+        // Step 2: Validate file exists
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            dlog("Recording file not found at: \(fileURL.path)")
+            return
+        }
+
+        // Step 3: Attempt save with retry logic
+        do {
+            try await saveWithRetry(fileURL: fileURL, maxRetries: 3)
+            dlog("Video saved to Photo Library: \(fileURL.lastPathComponent)")
+        } catch {
+            dlog("Failed to save video to Photo Library: \(error.localizedDescription)")
+        }
+    }
+
+    private func saveWithRetry(fileURL: URL, maxRetries: Int) async throws {
+        var lastError: Error?
+
+        for attempt in 0..<maxRetries {
+            do {
+                try await PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
+                }
+                return // Success!
+            } catch {
+                lastError = error
+                if attempt < maxRetries - 1 {
+                    // Exponential backoff: 1s, 2s, 4s
+                    let delayNanoseconds = UInt64(1 << attempt) * 1_000_000_000
+                    try await Task.sleep(nanoseconds: delayNanoseconds)
+                }
+            }
+        }
+
+        if let error = lastError {
+            throw error
         }
     }
 

@@ -1,0 +1,101 @@
+{
+  "project_info": {
+    "project_number": "1040428211318",
+    "project_id": "salt-media-app1",
+    "storage_bucket": "salt-media-app1.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1040428211318:android:eb4543ad675f1e32aad357",
+        "android_client_info": {
+          "package_name": "tv.stationcast.station_cast"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1040428211318-i9rkmsjtad9hlbpav749hl1gp4f3mslb.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBOyQCGPRr5ztkSl6YIS_SRWxKYQHHrsGA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1040428211318-i9rkmsjtad9hlbpav749hl1gp4f3mslb.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1040428211318-df6l3vs8na17bvptue6ujujnk7j41hdt.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "ug.saltmedia.saltmedia2",
+                "app_store_id": "6498908773"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1040428211318:android:a55a70c2a074e0c9aad357",
+        "android_client_info": {
+          "package_name": "ug.saltmedia.saltmedia"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1040428211318-5nvdmvataurtcoqspis3ov1t00g35moc.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "ug.saltmedia.saltmedia",
+            "certificate_hash": "0bef3c25497c7609a4c21a330db3e1f72a03b0c4"
+          }
+        },
+        {
+          "client_id": "1040428211318-po5j6s3g0qf8oqtko4dthd38123f1gt8.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "ug.saltmedia.saltmedia",
+            "certificate_hash": "05eb842981e1c2ca1679273c218edb5a791852ad"
+          }
+        },
+        {
+          "client_id": "1040428211318-i9rkmsjtad9hlbpav749hl1gp4f3mslb.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBOyQCGPRr5ztkSl6YIS_SRWxKYQHHrsGA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1040428211318-i9rkmsjtad9hlbpav749hl1gp4f3mslb.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1040428211318-df6l3vs8na17bvptue6ujujnk7j41hdt.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "ug.saltmedia.saltmedia2",
+                "app_store_id": "6498908773"
+              }
+            }
+          ]
+        }
+      },
+      "admob_app_id": "ca-app-pub-3214967779411699~4026149224"
+    }
+  ],
+  "configuration_version": "1"
+}

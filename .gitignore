@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Secrets and credentials
+lib/firebase_options.dart
+lib/secrets.dart
+.env
+.env.*
+!.env.example

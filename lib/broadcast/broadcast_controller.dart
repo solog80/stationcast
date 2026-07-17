@@ -6,6 +6,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/camera_settings.dart';
 import '../models/destination_preset.dart';
 import '../models/encoder_settings.dart';
+import '../models/recording_settings.dart';
 import '../utils/log.dart';
 import 'providers.dart';
 
@@ -19,6 +20,7 @@ class BroadcastUiState {
     this.maxZoom = 1.0,
     this.cameraAspectRatio = 16 / 9,
     this.liveSince,
+    this.isRecording = false,
     this.errorMessage,
     this.activePreset,
     this.reconnectAttempt = 0,
@@ -34,6 +36,7 @@ class BroadcastUiState {
   final double maxZoom;
   final double cameraAspectRatio;
   final DateTime? liveSince;
+  final bool isRecording;
   final String? errorMessage;
   final DestinationPreset? activePreset;
   final int reconnectAttempt;
@@ -55,6 +58,7 @@ class BroadcastUiState {
     double? cameraAspectRatio,
     DateTime? liveSince,
     bool clearLiveSince = false,
+    bool? isRecording,
     String? errorMessage,
     bool clearError = false,
     DestinationPreset? activePreset,
@@ -70,6 +74,7 @@ class BroadcastUiState {
     maxZoom: maxZoom ?? this.maxZoom,
     cameraAspectRatio: cameraAspectRatio ?? this.cameraAspectRatio,
     liveSince: clearLiveSince ? null : (liveSince ?? this.liveSince),
+    isRecording: isRecording ?? this.isRecording,
     errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
     activePreset: activePreset ?? this.activePreset,
     reconnectAttempt: reconnectAttempt ?? this.reconnectAttempt,
@@ -101,7 +106,14 @@ class BroadcastController extends Notifier<BroadcastUiState> {
   }
 
   Future<void> initialize(EncoderSettings encoder) async {
-    await _plugin.initialize(encoder.toEncoderConfig());
+    await _plugin.initializeWithRecording(
+      encoder.toEncoderConfig(),
+      recordingEnabled: encoder.recording.enabled,
+      recordingResolution: encoder.recording.resolution.name,
+      recordingBitrateBps: encoder.recording.bitrateBps,
+      recordingFps: encoder.recording.fps.value,
+      recordingCodec: encoder.recording.codec.name,
+    );
     await _plugin.setMirrorFrontCamera(encoder.mirrorFrontCamera);
 
     // Initialize Camera2Manager for preview-time camera settings
@@ -116,8 +128,7 @@ class BroadcastController extends Notifier<BroadcastUiState> {
     final maxZoom = await _plugin.getMaxZoom();
     double aspectRatio = 16 / 9;
     try {
-      final resolution =
-          await _plugin.getCameraResolution() as Map<dynamic, dynamic>?;
+      final resolution = await _plugin.getCameraResolution();
       log('[BroadcastController] getCameraResolution result: $resolution');
       if (resolution != null && resolution['aspectRatio'] is num) {
         aspectRatio = (resolution['aspectRatio'] as num).toDouble();
@@ -141,18 +152,27 @@ class BroadcastController extends Notifier<BroadcastUiState> {
   Future<void> goLive(DestinationPreset preset) async {
     if (state.isLive || state.isBusy) return;
     _wantLive = true;
+    final encoder = await ref.read(encoderSettingsProvider.future);
     state = state.copyWith(
       activePreset: preset,
       clearError: true,
       reconnectAttempt: 0,
+      isRecording: encoder.recording.enabled,
     );
     try {
-      await _plugin.startStream(preset.toDestinationConfig());
+      await _plugin.startStreamWithRecording(
+        preset.toDestinationConfig(),
+        recordingEnabled: encoder.recording.enabled,
+      );
     } catch (e) {
       _wantLive = false;
+      // Keep recording active even if streaming fails
+      final errorMessage = _getUserFriendlyErrorMessage(e.toString());
       state = state.copyWith(
         connection: BroadcastConnectionState.failed,
-        errorMessage: '$e',
+        errorMessage: errorMessage,
+        // Don't stop recording if stream fails - user can continue recording locally
+        isRecording: encoder.recording.enabled,
       );
     }
   }
@@ -164,6 +184,7 @@ class BroadcastController extends Notifier<BroadcastUiState> {
       connection: BroadcastConnectionState.stopped,
       clearLiveSince: true,
       reconnectAttempt: 0,
+      isRecording: false,
     );
   }
 
@@ -208,6 +229,7 @@ class BroadcastController extends Notifier<BroadcastUiState> {
   // Camera2 control methods
   Future<void> applyCameraSettings(CameraSettings camera) async {
     try {
+      log('[BroadcastController] applyCameraSettings: zoom=${camera.zoom}, EIS=${camera.videoStabilization}');
       await _plugin.camera2SetZoom(camera.zoom);
       // Try batch (iOS), fall back to individual (Android)
       try {
@@ -235,6 +257,10 @@ class BroadcastController extends Notifier<BroadcastUiState> {
 
   Future<void> setCameraZoom(double ratio) async {
     await _plugin.camera2SetZoom(ratio);
+  }
+
+  Future<void> setVideoStabilizationOnly(bool enabled) async {
+    await _plugin.camera2SetVideoStabilization(enabled);
   }
 
   Future<void> setCameraFocusMode(FocusMode mode) async {
@@ -286,6 +312,7 @@ class BroadcastController extends Notifier<BroadcastUiState> {
             connection: BroadcastConnectionState.failed,
             errorMessage: event.message,
             clearLiveSince: true,
+            isRecording: false,
           );
         }
       case BroadcastConnectionState.stopped:
@@ -293,11 +320,33 @@ class BroadcastController extends Notifier<BroadcastUiState> {
           state = state.copyWith(
             connection: BroadcastConnectionState.stopped,
             clearLiveSince: true,
+            isRecording: false,
           );
         }
       case BroadcastConnectionState.reconnecting:
       case BroadcastConnectionState.idle:
         state = state.copyWith(connection: event.state);
+    }
+  }
+
+  String _getUserFriendlyErrorMessage(String technicalError) {
+    // Convert technical errors to user-friendly messages
+    final errorLower = technicalError.toLowerCase();
+
+    if (errorLower.contains('connection') ||
+        errorLower.contains('timeout') ||
+        errorLower.contains('network') ||
+        errorLower.contains('srthaishinkit') ||
+        errorLower.contains('rtmp')) {
+      return 'Offline - Check your connection or server';
+    } else if (errorLower.contains('permission') ||
+               errorLower.contains('denied')) {
+      return 'Permission denied - Check camera/microphone access';
+    } else if (errorLower.contains('camera') ||
+               errorLower.contains('mic')) {
+      return 'Camera or microphone not available';
+    } else {
+      return 'Connection failed - Try again';
     }
   }
 
@@ -311,13 +360,14 @@ class BroadcastController extends Notifier<BroadcastUiState> {
         connection: BroadcastConnectionState.failed,
         errorMessage: reason ?? 'Connection lost',
         clearLiveSince: true,
+        isRecording: false,
       );
       return;
     }
     state = state.copyWith(
       connection: BroadcastConnectionState.reconnecting,
       reconnectAttempt: attempt,
-      errorMessage: reason,
+      errorMessage: _getUserFriendlyErrorMessage(reason ?? ''),
     );
     await Future<void>.delayed(Duration(seconds: 2 * attempt));
     if (!_wantLive) return;

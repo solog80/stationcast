@@ -7,6 +7,7 @@ public class StationBroadcastPlugin: NSObject, FlutterPlugin {
     private var eventSink: FlutterEventSink?
     private var statsSink: FlutterEventSink?
     private var histogramSink: FlutterEventSink?
+    private var recordingSink: FlutterEventSink?
 
     @MainActor
     override init() {
@@ -20,6 +21,9 @@ public class StationBroadcastPlugin: NSObject, FlutterPlugin {
         }
         engine.onHistogram = { [weak self] bins in
             self?.histogramSink?(bins)
+        }
+        engine.onRecording = { [weak self] event, data in
+            self?.recordingSink?(["event": event, "data": data as Any])
         }
     }
 
@@ -44,6 +48,11 @@ public class StationBroadcastPlugin: NSObject, FlutterPlugin {
             name: "tv.stationcast/broadcast/histogram", binaryMessenger: registrar.messenger())
         histogramChannel.setStreamHandler(
             ChannelStreamHandler { sink in instance.histogramSink = sink })
+
+        let recordingChannel = FlutterEventChannel(
+            name: "tv.stationcast/broadcast/recording", binaryMessenger: registrar.messenger())
+        recordingChannel.setStreamHandler(
+            ChannelStreamHandler { sink in instance.recordingSink = sink })
 
         let cameraFactory = MainActor.assumeIsolated { CameraPreviewFactory(engine: instance.engine) }
         registrar.register(cameraFactory, withId: "tv.stationcast/camera_preview")

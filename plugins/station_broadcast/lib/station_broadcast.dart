@@ -54,9 +54,39 @@ class StationBroadcast {
   Future<void> initialize(EncoderConfig config) =>
       _channel.invokeMethod('initialize', config.toMap());
 
+  /// Initialize with encoder config and recording settings.
+  Future<void> initializeWithRecording(
+    EncoderConfig config, {
+    bool recordingEnabled = true,
+    String recordingResolution = 'p1080',
+    int recordingBitrateBps = 6000000,
+    int recordingFps = 25,
+    String recordingCodec = 'h264',
+  }) async {
+    final params = config.toMap();
+    params.addAll({
+      'recordingEnabled': recordingEnabled,
+      'recordingResolution': recordingResolution,
+      'recordingBitrateBps': recordingBitrateBps,
+      'recordingFps': recordingFps,
+      'recordingCodec': recordingCodec,
+    });
+    return _channel.invokeMethod('initialize', params);
+  }
+
   /// Connects to the destination and starts publishing.
   Future<void> startStream(DestinationConfig destination) =>
       _channel.invokeMethod('startStream', destination.toMap());
+
+  /// Start stream with recording settings.
+  Future<void> startStreamWithRecording(
+    DestinationConfig destination, {
+    bool recordingEnabled = true,
+  }) async {
+    final params = destination.toMap();
+    params['recordingEnabled'] = recordingEnabled;
+    return _channel.invokeMethod('startStream', params);
+  }
 
   Future<void> stopStream() => _channel.invokeMethod('stopStream');
 

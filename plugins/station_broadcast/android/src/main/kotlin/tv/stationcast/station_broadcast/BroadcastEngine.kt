@@ -7,7 +7,9 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioFormat
 import android.media.AudioRecord
+import android.media.MediaCodec
 import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.media.MediaRecorder
 import android.os.Build
 import android.util.Size
@@ -17,9 +19,9 @@ import io.github.thibaultbee.streampack.core.elements.sources.video.camera.ICame
 import io.github.thibaultbee.streampack.core.interfaces.setCameraId
 import io.github.thibaultbee.streampack.core.interfaces.startStream
 import io.github.thibaultbee.streampack.core.streamers.single.AudioConfig
-import io.github.thibaultbee.streampack.core.streamers.single.SingleStreamer
+import io.github.thibaultbee.streampack.core.streamers.dual.DualStreamer
+import io.github.thibaultbee.streampack.core.streamers.dual.cameraDualStreamer
 import io.github.thibaultbee.streampack.core.streamers.single.VideoConfig
-import io.github.thibaultbee.streampack.core.streamers.single.cameraSingleStreamer
 import io.github.thibaultbee.streampack.ext.srt.configuration.mediadescriptor.SrtMediaDescriptor
 import java.io.File
 import java.text.SimpleDateFormat
@@ -35,8 +37,12 @@ import kotlinx.coroutines.launch
 /** StreamPack-based broadcast engine: camera+mic capture, SRT publish. */
 class BroadcastEngine(private val context: Context) {
 
-    var streamer: SingleStreamer? = null
+    var streamer: DualStreamer? = null
         private set
+
+    private var recordingFilePath: String? = null
+    private var recordingEncoder: MediaCodec? = null
+    private var recordingMuxer: android.media.MediaMuxer? = null
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -95,7 +101,7 @@ class BroadcastEngine(private val context: Context) {
 
     @RequiresPermission(allOf = [Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO])
     suspend fun initialize(args: Map<*, *>) {
-        val current = streamer ?: cameraSingleStreamer(context).also { streamer = it }
+        val current = streamer ?: cameraDualStreamer(context).also { streamer = it }
         val width = (args["width"] as Number? ?: 1280).toInt()
         val height = (args["height"] as Number? ?: 720).toInt()
         val fps = (args["fps"] as Number? ?: 30).toInt()
@@ -106,53 +112,75 @@ class BroadcastEngine(private val context: Context) {
             else -> MediaFormat.MIMETYPE_VIDEO_AVC
         }
 
+        // Recording settings
+        val recordingEnabled = (args["recordingEnabled"] as Boolean?) ?: true
+        val recordingResolution = (args["recordingResolution"] as String?) ?: "p1080"
+        val recordingBitrateBps = (args["recordingBitrateBps"] as Number? ?: 6_000_000).toInt()
+        val recordingFps = (args["recordingFps"] as Number? ?: 25).toInt()
+        val recordingCodec = when (args["recordingCodec"] as String?) {
+            "hevc" -> MediaFormat.MIMETYPE_VIDEO_HEVC
+            else -> MediaFormat.MIMETYPE_VIDEO_AVC
+        }
+
         val deviceOrientation = context.resources.configuration.orientation
         val orientationLabel = if (deviceOrientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) "PORTRAIT" else "LANDSCAPE"
         android.util.Log.d("[BroadcastEngine]", "initialize: device orientation=$orientationLabel")
         android.util.Log.d("[BroadcastEngine]", "initialize: raw args width=${args["width"]}, height=${args["height"]}")
         android.util.Log.d("[BroadcastEngine]", "initialize: parsed width=$width, height=$height")
-
-        // Store base parameters for orientation changes
-        // (Orientation listener infrastructure retained for future use)
-        // baseWidth = width
-        // baseHeight = height
-        // baseFps = fps
-        // baseVideoBitrate = videoBitrate
-        // baseAudioBitrate = audioBitrate
-        // baseMimeType = mimeType
+        android.util.Log.d("[BroadcastEngine]", "initialize: recording enabled=$recordingEnabled, resolution=$recordingResolution, bitrate=$recordingBitrateBps, fps=$recordingFps")
 
         // Always use landscape resolution for stream (16:9)
-        // Always pass landscape dimensions regardless of device orientation
         val streamWidth = kotlin.math.max(width, height)
         val streamHeight = kotlin.math.min(width, height)
 
-        android.util.Log.d("[BroadcastEngine]", "initialize: input=${width}x${height}, always using landscape=${streamWidth}x${streamHeight}")
-        android.util.Log.d("[BroadcastEngine]", "setConfig: device=$orientationLabel, sending resolution=${streamWidth}x${streamHeight}")
+        android.util.Log.d("[BroadcastEngine]", "initialize: input=${width}x${height}, stream using landscape=${streamWidth}x${streamHeight}")
 
         // Store base parameters for orientation changes
         baseWidth = streamWidth
         baseHeight = streamHeight
-        baseBitrate = videoBitrate
-        baseFps = fps
+        baseBitrate = 3_000_000  // Lock stream to 3Mbps
+        baseFps = 30
         baseMimeType = mimeType
 
-        current.setConfig(
-            AudioConfig(startBitrate = audioBitrate),
-            VideoConfig(mimeType = mimeType, startBitrate = videoBitrate, resolution = Size(streamWidth, streamHeight), fps = fps)
-        )
+        // Configure both encoders with DualStreamer config
+        // Encoder #1 (first): Streaming (uses encoder settings resolution and fps)
+        val streamAudioCodecConfig = io.github.thibaultbee.streampack.core.streamers.dual.DualStreamerAudioCodecConfig(startBitrate = audioBitrate)
+        val streamVideoCodecConfig = io.github.thibaultbee.streampack.core.streamers.dual.DualStreamerVideoCodecConfig(mimeType = mimeType, startBitrate = videoBitrate, resolution = Size(width, height))
 
-        val actualVideoConfig = current.videoConfigFlow.value
-        android.util.Log.d("[BroadcastEngine]", "Streamer config SET to ${streamWidth}x${streamHeight}, ACTUAL=${actualVideoConfig?.resolution}")
+        if (recordingEnabled) {
+            // Encoder #2 (second): Recording (configurable from RecordingSettings)
+            val recordingHeight = when (recordingResolution) {
+                "p720" -> 720
+                "p1440" -> 1440
+                else -> 1080
+            }
+            val recordingWidth = (recordingHeight * 16 / 9).toInt()
+            android.util.Log.d("[BroadcastEngine]", "Recording encoder config: ${recordingWidth}x${recordingHeight}@${recordingFps}fps, bitrate=$recordingBitrateBps")
+
+            val recordingAudioCodecConfig = io.github.thibaultbee.streampack.core.streamers.dual.DualStreamerAudioCodecConfig(startBitrate = audioBitrate)
+            val recordingVideoCodecConfig = io.github.thibaultbee.streampack.core.streamers.dual.DualStreamerVideoCodecConfig(mimeType = recordingCodec, startBitrate = recordingBitrateBps, resolution = Size(recordingWidth, recordingHeight))
+
+            // Set independent configs for both encoders using factory functions
+            val dualAudioConfig = io.github.thibaultbee.streampack.core.streamers.dual.DualStreamerAudioConfig(streamAudioCodecConfig, recordingAudioCodecConfig)
+            val dualVideoConfig = io.github.thibaultbee.streampack.core.streamers.dual.DualStreamerVideoConfig(recordingFps, streamVideoCodecConfig, recordingVideoCodecConfig)
+            current.setConfig(dualAudioConfig, dualVideoConfig)
+        } else {
+            // Only streaming encoder, but still use DualStreamer for consistency
+            val dualAudioConfig = io.github.thibaultbee.streampack.core.streamers.dual.DualStreamerAudioConfig(streamAudioCodecConfig)
+            val dualVideoConfig = io.github.thibaultbee.streampack.core.streamers.dual.DualStreamerVideoConfig(30, streamVideoCodecConfig)
+            current.setConfig(dualAudioConfig, dualVideoConfig)
+        }
+
+        android.util.Log.d("[BroadcastEngine]", "Stream encoder config: ${width}x${height}@${fps}fps ${videoBitrate / 1_000_000}Mbps")
 
         // Set rotation based on device orientation at init time
-        // NOTE: Can't change resolution while streaming, so this rotation is locked for the stream duration
         val initialRotation = if (deviceOrientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) {
-            android.view.Surface.ROTATION_90  // Portrait device → ROTATION_90 for upright portrait stream
+            android.view.Surface.ROTATION_90
         } else {
-            android.view.Surface.ROTATION_0   // Landscape device → no rotation, landscape stream
+            android.view.Surface.ROTATION_0
         }
         current.setTargetRotation(initialRotation)
-        android.util.Log.d("[BroadcastEngine]", "Initial target rotation=$initialRotation (based on device ORIENTATION_${if (deviceOrientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) "PORTRAIT" else "LANDSCAPE"}, locked for stream duration)")
+        android.util.Log.d("[BroadcastEngine]", "Initial target rotation=$initialRotation (locked for stream duration)")
     }
 
     private var baseWidth = 0
@@ -162,45 +190,10 @@ class BroadcastEngine(private val context: Context) {
     private var baseMimeType = ""
 
     private fun startOrientationListener() {
+        // Orientation listener disabled: rotation is locked at initialization time
+        // This prevents resolution changes mid-stream which StreamPack doesn't support well
         orientationListener?.disable()
-        orientationListener = object : android.view.OrientationEventListener(context) {
-            override fun onOrientationChanged(orientation: Int) {
-                val current = streamer ?: return
-                if (baseWidth == 0 || baseHeight == 0) return
-
-                val isPortrait = orientation < 45 || orientation >= 315
-                val (outputWidth, outputHeight) = if (isPortrait) {
-                    // Portrait: swap to portrait resolution
-                    Pair(baseHeight, baseWidth)
-                } else {
-                    // Landscape: keep original (landscape) resolution
-                    Pair(baseWidth, baseHeight)
-                }
-
-                scope.launch {
-                    try {
-                        val beforeConfig = current.videoConfigFlow.value
-                        android.util.Log.d("[BroadcastEngine]", "Before orientation update: ${beforeConfig?.resolution}")
-
-                        val newConfig = VideoConfig(
-                            mimeType = baseMimeType,
-                            startBitrate = baseBitrate,
-                            resolution = android.util.Size(outputWidth, outputHeight),
-                            fps = baseFps
-                        )
-                        android.util.Log.d("[BroadcastEngine]", "Calling setVideoConfig(${outputWidth}x${outputHeight})")
-                        current.setVideoConfig(newConfig)
-
-                        val afterConfig = current.videoConfigFlow.value
-                        android.util.Log.d("[BroadcastEngine]", "After setVideoConfig: ${afterConfig?.resolution}")
-                        android.util.Log.d("[BroadcastEngine]", "Orientation $orientation° -> requested ${outputWidth}x${outputHeight}, encoder now at ${afterConfig?.resolution}")
-                    } catch (e: Exception) {
-                        android.util.Log.e("[BroadcastEngine]", "ERROR updating config: ${e.javaClass.simpleName}: ${e.message}")
-                        e.printStackTrace()
-                    }
-                }
-            }
-        }.apply { enable() }
+        orientationListener = null
     }
 
     private fun updateVideoConfig() {
@@ -213,11 +206,12 @@ class BroadcastEngine(private val context: Context) {
 
         isStreamingRequested = true
         try {
+            // Start FIRST streamer: streaming
             when (args["protocol"] as String?) {
                 "rtmp" -> {
                     val url = requireNotNull(args["rtmpUrl"] as String?) { "rtmpUrl required" }
                     val key = args["streamKey"] as String? ?: ""
-                    current.startStream(if (key.isEmpty()) url else "$url/$key")
+                    current.first.startStream(if (key.isEmpty()) url else "$url/$key")
                 }
                 else -> {
                     val descriptor = SrtMediaDescriptor(
@@ -227,9 +221,75 @@ class BroadcastEngine(private val context: Context) {
                         passPhrase = (args["passphrase"] as String?)?.ifEmpty { null },
                         latency = (args["latencyMs"] as Number?)?.toInt()
                     )
-                    current.startStream(descriptor)
+                    current.first.startStream(descriptor)
                 }
             }
+
+            // Start SECOND streamer: recording if enabled
+            val recordingEnabled = (args["recordingEnabled"] as Boolean?) ?: true
+            android.util.Log.d("[BroadcastEngine]", "startStream: recordingEnabled=$recordingEnabled")
+
+            if (recordingEnabled) {
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                android.util.Log.d("[BroadcastEngine]", "Recording timestamp: $timestamp")
+
+                try {
+                    // Use MediaStore API to create file (works without storage permissions on Android 11+)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        val contentValues = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, "stationcast_$timestamp.mp4")
+                            put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                            put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_MOVIES + "/StationCast")
+                            put(android.provider.MediaStore.Video.Media.IS_PENDING, 1)
+                        }
+
+                        val contentUri = android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                        val uri = context.contentResolver.insert(contentUri, contentValues)
+
+                        if (uri != null) {
+                            android.util.Log.d("[BroadcastEngine]", "MediaStore URI created: $uri")
+                            recordingFilePath = uri.toString()
+
+                            // Use UriMediaDescriptor with context for proper container detection
+                            val mediaDescriptor = io.github.thibaultbee.streampack.core.configuration.mediadescriptor.UriMediaDescriptor(context, uri)
+                            current.second.startStream(mediaDescriptor)
+                            android.util.Log.d("[BroadcastEngine]", "Recording stream started successfully (MediaStore)")
+
+                            emit("recordingStarted", recordingFilePath)
+                        } else {
+                            throw Exception("Failed to create MediaStore URI")
+                        }
+                    } else {
+                        // Fallback for Android 9 and below
+                        val moviesDir = File(
+                            android.os.Environment.getExternalStoragePublicDirectory(
+                                android.os.Environment.DIRECTORY_MOVIES
+                            ),
+                            "StationCast"
+                        )
+                        android.util.Log.d("[BroadcastEngine]", "Recording dir path: ${moviesDir.absolutePath}")
+
+                        if (!moviesDir.exists()) {
+                            moviesDir.mkdirs()
+                        }
+
+                        recordingFilePath = File(moviesDir, "stationcast_$timestamp.mp4").absolutePath
+                        android.util.Log.d("[BroadcastEngine]", "Recording file path: $recordingFilePath")
+
+                        val recordingFile = File(recordingFilePath!!)
+                        val recordingUri = android.net.Uri.fromFile(recordingFile)
+
+                        current.second.startStream(recordingUri.toString())
+                        android.util.Log.d("[BroadcastEngine]", "Recording stream started successfully (File)")
+
+                        emit("recordingStarted", recordingFilePath)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("[BroadcastEngine]", "Recording error: ${e.message}", e)
+                    emit("recordingFailed", e.message ?: "Unknown error")
+                }
+            }
+
             startForegroundService()
             startStatsPolling(current)
             startConnectionWatch(current)
@@ -247,10 +307,50 @@ class BroadcastEngine(private val context: Context) {
         watchJob?.cancel()
         orientationListener?.disable()
         stopForegroundService()
+
+        android.util.Log.d("[BroadcastEngine]", "Stopping stream...")
+
         streamer?.let {
-            runCatching { it.stopStream() }
-            runCatching { it.close() }
+            runCatching {
+                android.util.Log.d("[BroadcastEngine]", "Stopping first stream")
+                it.first.stopStream()
+            }
+            runCatching {
+                android.util.Log.d("[BroadcastEngine]", "Stopping second stream (recording)")
+                it.second.stopStream()
+            }
+            runCatching {
+                android.util.Log.d("[BroadcastEngine]", "Closing streamer")
+                it.close()
+            }
         }
+
+        if (recordingFilePath != null) {
+            try {
+                // If recording was via MediaStore, mark as complete
+                if (recordingFilePath!!.startsWith("content://")) {
+                    val uri = android.net.Uri.parse(recordingFilePath!!)
+                    val contentValues = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Video.Media.IS_PENDING, 0)
+                    }
+                    context.contentResolver.update(uri, contentValues, null, null)
+                    android.util.Log.d("[BroadcastEngine]", "MediaStore recording finalized")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("[BroadcastEngine]", "Error finalizing recording: ${e.message}")
+            }
+
+            // Log file size
+            if (!recordingFilePath!!.startsWith("content://")) {
+                val file = File(recordingFilePath!!)
+                android.util.Log.d("[BroadcastEngine]", "Recording stopped. File exists: ${file.exists()}, Size: ${file.length()} bytes")
+            }
+
+            emit("recordingStopped", recordingFilePath)
+            recordingFilePath = null
+        }
+
+        android.util.Log.d("[BroadcastEngine]", "Stream stopped")
         emit("stopped", null)
     }
 
@@ -287,6 +387,7 @@ class BroadcastEngine(private val context: Context) {
     }
 
     suspend fun setZoom(ratio: Float) {
+        android.util.Log.d("[BroadcastEngine]", "setZoom called with $ratio")
         cameraSource()?.settings?.zoom?.setZoomRatio(ratio)
     }
 
@@ -304,9 +405,9 @@ class BroadcastEngine(private val context: Context) {
     }
 
     suspend fun setVideoBitrate(bps: Int) {
-        val current = streamer ?: return
-        val videoConfig = current.videoConfigFlow.value ?: return
-        current.setVideoConfig(videoConfig.copy(startBitrate = bps))
+        // Note: DualStreamer video config is set via setConfig(DualStreamerVideoConfig)
+        // Runtime bitrate adjustment is deferred - would require reconstructing both configs
+        android.util.Log.d("[BroadcastEngine]", "setVideoBitrate called with $bps bps (deferred)")
     }
 
     /** Full Camera2 API via StreamPack's ICameraSource.settings */
@@ -350,6 +451,7 @@ class BroadcastEngine(private val context: Context) {
         cam.setSensorSensitivity(iso)
     }
     suspend fun camera2SetVideoStabilization(enabled: Boolean) {
+        android.util.Log.d("[BroadcastEngine]", "camera2SetVideoStabilization called with $enabled")
         val cam = cameraSource()?.settings?.stabilization ?: return
         cam.setIsEnableVideo(enabled)
     }
@@ -419,6 +521,16 @@ class BroadcastEngine(private val context: Context) {
             runCatching { it.release() }
         }
         streamer = null
+        recordingMuxer?.let {
+            runCatching { it.stop() }
+            runCatching { it.release() }
+        }
+        recordingMuxer = null
+        recordingEncoder?.let {
+            runCatching { it.stop() }
+            runCatching { it.release() }
+        }
+        recordingEncoder = null
     }
 
     private fun cameraSource(): ICameraSource? =
@@ -494,12 +606,15 @@ class BroadcastEngine(private val context: Context) {
         } catch (_: Exception) {}
     }
 
-    private fun startStatsPolling(current: SingleStreamer) {
+    private fun startStatsPolling(current: DualStreamer) {
         initAudioProbe()
         statsJob?.cancel()
         statsJob = scope.launch {
             while (isActive) {
-                val stats = runCatching { current.endpoint.metrics as? Stats }.getOrNull()
+                // Stats from first endpoint (streaming)
+                val stats = runCatching {
+                    (current.first as? io.github.thibaultbee.streampack.core.pipelines.outputs.encoding.IEncodingPipelineOutput)?.endpoint?.metrics as? Stats
+                }.getOrNull()
                 if (stats != null) {
                     lastStats = stats
                     onStats?.invoke(mapOf(
@@ -526,10 +641,12 @@ class BroadcastEngine(private val context: Context) {
         }
     }
 
-    private fun startConnectionWatch(current: SingleStreamer) {
+    private fun startConnectionWatch(current: DualStreamer) {
         watchJob?.cancel()
         watchJob = scope.launch {
-            current.endpoint.isOpenFlow.collect { open ->
+            // Monitor first endpoint (streaming connection)
+            val endpoint = (current.first as? io.github.thibaultbee.streampack.core.pipelines.outputs.encoding.IEncodingPipelineOutput)?.endpoint
+            endpoint?.isOpenFlow?.collect { open ->
                 if (!open && isStreamingRequested) {
                     isStreamingRequested = false
                     statsJob?.cancel()

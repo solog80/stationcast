@@ -1,4 +1,5 @@
 import 'package:station_broadcast/station_broadcast.dart';
+import 'recording_settings.dart';
 
 enum ResolutionPreset {
   fullHd(1920, 1080, '1080p'),
@@ -22,6 +23,7 @@ class EncoderSettings {
     this.audioBitrateBps = 128000,
     this.codec = BroadcastVideoCodec.h264,
     this.mirrorFrontCamera = false,
+    this.recording = const RecordingSettings(),
   });
 
   final ResolutionPreset resolution;
@@ -30,6 +32,7 @@ class EncoderSettings {
   final int audioBitrateBps;
   final BroadcastVideoCodec codec;
   final bool mirrorFrontCamera;
+  final RecordingSettings recording;
 
   EncoderConfig toEncoderConfig() => EncoderConfig(
     width: resolution.width,
@@ -47,6 +50,7 @@ class EncoderSettings {
     int? audioBitrateBps,
     BroadcastVideoCodec? codec,
     bool? mirrorFrontCamera,
+    RecordingSettings? recording,
   }) => EncoderSettings(
     resolution: resolution ?? this.resolution,
     fps: fps ?? this.fps,
@@ -54,6 +58,7 @@ class EncoderSettings {
     audioBitrateBps: audioBitrateBps ?? this.audioBitrateBps,
     codec: codec ?? this.codec,
     mirrorFrontCamera: mirrorFrontCamera ?? this.mirrorFrontCamera,
+    recording: recording ?? this.recording,
   );
 
   Map<String, Object?> toJson() => {
@@ -63,6 +68,7 @@ class EncoderSettings {
     'audioBitrateBps': audioBitrateBps,
     'codec': codec.name,
     'mirrorFrontCamera': mirrorFrontCamera,
+    'recording': recording.toJson(),
   };
 
   static EncoderSettings fromJson(Map<String, Object?> json) => EncoderSettings(
@@ -78,5 +84,8 @@ class EncoderSettings {
       orElse: () => BroadcastVideoCodec.h264,
     ),
     mirrorFrontCamera: (json['mirrorFrontCamera'] as bool?) ?? false,
+    recording: json['recording'] != null
+        ? RecordingSettings.fromJson(json['recording'] as Map<String, Object?>)
+        : const RecordingSettings(),
   );
 }

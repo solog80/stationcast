@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/camera_settings.dart';
 import '../models/destination_preset.dart';
 import '../models/encoder_settings.dart';
+import '../models/recording_settings.dart';
 import '../models/return_feed_config.dart';
 
 /// JSON-in-SharedPreferences persistence for presets and settings.
@@ -12,6 +13,7 @@ class SettingsRepository {
   static const _presetsKey = 'destination_presets';
   static const _defaultPresetKey = 'default_preset_id';
   static const _encoderKey = 'encoder_settings';
+  static const _recordingKey = 'recording_settings';
   static const _cameraKey = 'camera_settings';
   static const _returnFeedKey = 'return_feed_config';
 
@@ -78,5 +80,17 @@ class SettingsRepository {
   Future<void> saveReturnFeedConfig(ReturnFeedConfig config) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_returnFeedKey, jsonEncode(config.toJson()));
+  }
+
+  Future<RecordingSettings> loadRecordingSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_recordingKey);
+    if (raw == null) return const RecordingSettings();
+    return RecordingSettings.fromJson((jsonDecode(raw) as Map).cast<String, Object?>());
+  }
+
+  Future<void> saveRecordingSettings(RecordingSettings settings) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_recordingKey, jsonEncode(settings.toJson()));
   }
 }

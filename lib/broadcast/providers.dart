@@ -6,6 +6,7 @@ import 'package:station_broadcast/station_broadcast.dart';
 import '../models/camera_settings.dart';
 import '../models/destination_preset.dart';
 import '../models/encoder_settings.dart';
+import '../models/recording_settings.dart';
 import '../models/return_feed_config.dart';
 import '../services/auth_service.dart';
 import '../services/broadcast_reporter.dart';
@@ -156,18 +157,33 @@ class CameraSettingsNotifier extends AsyncNotifier<CameraSettings> {
       ref.read(settingsRepositoryProvider).loadCameraSettings();
 
   Future<void> save(CameraSettings settings) async {
+    final oldSettings = state.valueOrNull;
     state = AsyncData(settings);
     await ref.read(settingsRepositoryProvider).saveCameraSettings(settings);
 
-    // Apply settings immediately to the camera
+    // Only apply changed settings to avoid resetting pinch zoom or other native state
     try {
       final broadcastController = ref.read(
         broadcastControllerProvider.notifier,
       );
-      log(
-        '[CameraSettings] applying settings: WB=${settings.whiteBalance.name} EV=${settings.exposureCompensation} ISO=${settings.isoSensitivity} Focus=${settings.focusMode.name}',
-      );
-      await broadcastController.applyCameraSettings(settings);
+
+      // Check if only videoStabilization changed
+      if (oldSettings != null &&
+          oldSettings.zoom == settings.zoom &&
+          oldSettings.whiteBalance == settings.whiteBalance &&
+          oldSettings.exposureCompensation == settings.exposureCompensation &&
+          oldSettings.isoSensitivity == settings.isoSensitivity &&
+          oldSettings.focusMode == settings.focusMode &&
+          oldSettings.flashMode == settings.flashMode &&
+          oldSettings.videoStabilization != settings.videoStabilization) {
+        // Only EIS changed - apply just that
+        log('[CameraSettings] Only EIS changed: ${settings.videoStabilization}');
+        await broadcastController.setVideoStabilizationOnly(settings.videoStabilization);
+      } else {
+        // Multiple settings changed or first time - apply all
+        log('[CameraSettings] Applying all settings: Zoom=${settings.zoom} EIS=${settings.videoStabilization}');
+        await broadcastController.applyCameraSettings(settings);
+      }
     } catch (e) {
       log('[CameraSettings] apply error: $e');
     }
@@ -193,10 +209,15 @@ final cameraCapabilitiesFutureProvider = FutureProvider<Map<String, dynamic>>((
   }
 });
 
-/// Side effect: Apply camera settings in real-time when they change (preview mode)
+/// Side effect: Apply camera settings in real-time when they change (preview mode only)
+/// Skip during live streaming to preserve pinch-zoom on native preview
 final cameraSettingsEffectProvider = FutureProvider<void>((ref) async {
+  final broadcastState = ref.watch(broadcastControllerProvider);
   final broadcastController = ref.watch(broadcastControllerProvider.notifier);
   final camera = await ref.watch(cameraSettingsProvider.future);
+
+  // Only apply settings during preview; skip during live to preserve pinch zoom
+  if (broadcastState.isLive) return;
 
   try {
     await broadcastController.applyCameraSettings(camera);
@@ -325,4 +346,20 @@ class ReturnFeedConfigNotifier extends AsyncNotifier<ReturnFeedConfig> {
 final returnFeedConfigProvider =
     AsyncNotifierProvider<ReturnFeedConfigNotifier, ReturnFeedConfig>(
       ReturnFeedConfigNotifier.new,
+    );
+
+class RecordingSettingsNotifier extends AsyncNotifier<RecordingSettings> {
+  @override
+  Future<RecordingSettings> build() =>
+      ref.read(settingsRepositoryProvider).loadRecordingSettings();
+
+  Future<void> save(RecordingSettings settings) async {
+    state = AsyncData(settings);
+    await ref.read(settingsRepositoryProvider).saveRecordingSettings(settings);
+  }
+}
+
+final recordingSettingsProvider =
+    AsyncNotifierProvider<RecordingSettingsNotifier, RecordingSettings>(
+      RecordingSettingsNotifier.new,
     );

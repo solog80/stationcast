@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../broadcast/providers.dart';
 import '../../models/camera_settings.dart';
 import '../../theme/control_room_theme.dart';
+import '../../utils/log.dart';
 
 enum _ControlType { wb, iso, ev, focus, flash, eis }
 
@@ -112,8 +113,10 @@ class _CameraControlsStripState extends ConsumerState<CameraControlsStrip> {
           ),
         );
       } else if (item.type == _ControlType.eis) {
+        final newEis = !camera.videoStabilization;
+        log('[EIS Toggle] Current zoom=${camera.zoom}, toggling EIS to $newEis');
         notifier.save(
-          camera.copyWith(videoStabilization: !camera.videoStabilization),
+          camera.copyWith(videoStabilization: newEis),
         );
       }
     } else {

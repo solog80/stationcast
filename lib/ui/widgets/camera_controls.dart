@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../broadcast/providers.dart';
 import '../../models/camera_settings.dart';
 import '../../theme/control_room_theme.dart';
+import '../../utils/log.dart';
 
 /// Full manual camera control panel with all Camera2 features.
 class CameraControlsSection extends ConsumerWidget {
@@ -132,7 +133,10 @@ class _SensorControlsSection extends StatelessWidget {
           min: 1.0,
           max: 8.0,
           divisions: 70,
-          onChanged: (v) => notifier.save(camera.copyWith(zoom: v)),
+          onChanged: (v) {
+            log('[CameraSettings] Zoom slider in settings changed to $v');
+            notifier.save(camera.copyWith(zoom: v));
+          },
         ),
         const SizedBox(height: 12),
         _SliderControl(

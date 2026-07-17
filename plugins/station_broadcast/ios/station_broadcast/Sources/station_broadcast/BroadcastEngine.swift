@@ -203,8 +203,8 @@ final class BroadcastEngine {
         }
         await mixer.addOutput(stream)
 
-        // Attach recorder if enabled
-        if recordingEnabled, let config = recordingSettings {
+        // Attach recorder if enabled (only if not already recording)
+        if recordingEnabled, let config = recordingSettings, recordingStream == nil {
             await attachRecorder(to: stream, config: config)
         }
 
@@ -231,8 +231,8 @@ final class BroadcastEngine {
         }
         await mixer.addOutput(stream)
 
-        // Attach recorder if enabled
-        if recordingEnabled, let config = recordingSettings {
+        // Attach recorder if enabled (only if not already recording)
+        if recordingEnabled, let config = recordingSettings, recordingStream == nil {
             await attachRecorder(to: stream, config: config)
         }
 

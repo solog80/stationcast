@@ -30,6 +30,8 @@
 	<string>StationCast uses the camera to broadcast live video to your station.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>StationCast uses the microphone to broadcast live audio to your station.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>StationCast needs permission to save your recordings to your photo library.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>StationCast connects to SRT/RTMP servers on your local network for testing and studio ingest.</string>
 	<key>UIBackgroundModes</key>

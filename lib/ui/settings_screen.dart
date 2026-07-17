@@ -6,6 +6,7 @@ import '../broadcast/providers.dart';
 import '../models/camera_settings.dart';
 import '../models/destination_preset.dart';
 import '../models/encoder_settings.dart';
+import '../models/recording_settings.dart';
 import '../models/return_feed_config.dart';
 import '../services/auth_service.dart';
 import '../services/broadcast_reporter.dart';
@@ -23,6 +24,8 @@ class SettingsScreen extends ConsumerWidget {
         ref.watch(presetsProvider).value ?? const <DestinationPreset>[];
     final encoder =
         ref.watch(encoderSettingsProvider).value ?? const EncoderSettings();
+    final recording =
+        ref.watch(recordingSettingsProvider).value ?? const RecordingSettings();
     final camera =
         ref.watch(cameraSettingsProvider).value ?? const CameraSettings();
     final returnFeed =
@@ -68,6 +71,9 @@ class SettingsScreen extends ConsumerWidget {
           const SizedBox(height: 24),
           _sectionHeader('Encoder'),
           _EncoderSection(encoder: encoder),
+          const SizedBox(height: 24),
+          _sectionHeader('Recording'),
+          _RecordingSection(recording: recording),
           const SizedBox(height: 24),
           _sectionHeader('Camera'),
           CameraControlsSection(camera: camera),
@@ -446,6 +452,121 @@ class _EncoderSection extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  Widget _row(String label, Widget control) => Row(
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: [Text(label), control],
+  );
+}
+
+class _RecordingSection extends ConsumerWidget {
+  const _RecordingSection({required this.recording});
+
+  final RecordingSettings recording;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notifier = ref.read(recordingSettingsProvider.notifier);
+    return Card(
+      color: ControlRoomColors.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _row(
+              'Resolution',
+              DropdownButton<RecordingResolution>(
+                value: recording.resolution,
+                items: [
+                  for (final r in RecordingResolution.values)
+                    DropdownMenuItem(
+                      value: r,
+                      child: Text(_resolutionLabel(r)),
+                    ),
+                ],
+                onChanged: (r) => r == null
+                    ? null
+                    : notifier.save(recording.copyWith(resolution: r)),
+              ),
+            ),
+            _row(
+              'Frame rate',
+              DropdownButton<RecordingFps>(
+                value: recording.fps,
+                items: [
+                  for (final f in RecordingFps.values)
+                    DropdownMenuItem(value: f, child: Text(f.label)),
+                ],
+                onChanged: (fps) => fps == null
+                    ? null
+                    : notifier.save(recording.copyWith(fps: fps)),
+              ),
+            ),
+            _row(
+              'Codec',
+              DropdownButton<BroadcastVideoCodec>(
+                value: recording.codec,
+                items: const [
+                  DropdownMenuItem(
+                    value: BroadcastVideoCodec.h264,
+                    child: Text('H.264'),
+                  ),
+                  DropdownMenuItem(
+                    value: BroadcastVideoCodec.hevc,
+                    child: Text('HEVC'),
+                  ),
+                ],
+                onChanged: (codec) => codec == null
+                    ? null
+                    : notifier.save(recording.copyWith(codec: codec)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Bitrate: ${(recording.bitrateBps / 1_000_000).toStringAsFixed(1)} Mb/s',
+              style: const TextStyle(fontSize: 13),
+            ),
+            Slider(
+              value: recording.bitrateBps.toDouble(),
+              min: 2000000,
+              max: 12000000,
+              divisions: 20,
+              onChanged: (v) =>
+                  notifier.save(recording.copyWith(bitrateBps: v.round())),
+            ),
+            const SizedBox(height: 8),
+            _row(
+              'Enabled',
+              Switch(
+                value: recording.enabled,
+                onChanged: (v) =>
+                    notifier.save(recording.copyWith(enabled: v)),
+              ),
+            ),
+            const Text(
+              'Recordings save to Movies/StationCast with timestamp. View in Gallery or file manager.',
+              style: TextStyle(
+                fontSize: 11,
+                color: ControlRoomColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _resolutionLabel(RecordingResolution resolution) {
+    switch (resolution) {
+      case RecordingResolution.p720:
+        return '720p';
+      case RecordingResolution.p1080:
+        return '1080p';
+      case RecordingResolution.p1440:
+        return '1440p';
+    }
   }
 
   Widget _row(String label, Widget control) => Row(

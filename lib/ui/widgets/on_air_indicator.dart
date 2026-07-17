@@ -11,11 +11,13 @@ class OnAirIndicator extends StatefulWidget {
     required this.connection,
     this.liveSince,
     this.reconnectAttempt = 0,
+    this.isRecording = false,
   });
 
   final BroadcastConnectionState connection;
   final DateTime? liveSince;
   final int reconnectAttempt;
+  final bool isRecording;
 
   @override
   State<OnAirIndicator> createState() => _OnAirIndicatorState();
@@ -50,7 +52,7 @@ class _OnAirIndicatorState extends State<OnAirIndicator>
   Widget build(BuildContext context) {
     final (label, color, pulsing) = switch (widget.connection) {
       BroadcastConnectionState.live => (
-        'LIVE',
+        widget.isRecording ? 'LIVE/REC' : 'LIVE',
         ControlRoomColors.tallyRed,
         false,
       ),

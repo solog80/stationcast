@@ -404,6 +404,7 @@ class _ChromeOverlay extends ConsumerWidget {
                     connection: state.connection,
                     liveSince: state.liveSince,
                     reconnectAttempt: state.reconnectAttempt,
+                    isRecording: state.isRecording,
                   ),
                   const SizedBox(width: 10),
                   const TalkbackIndicator(),
@@ -959,6 +960,7 @@ class _CameraSettingsPanel extends ConsumerWidget {
                   min: 1.0,
                   max: actualMaxZoom,
                   onChanged: (value) {
+                    log('[Broadcast] Zoom slider changed to $value');
                     ref
                         .read(cameraSettingsProvider.notifier)
                         .save(camera.copyWith(zoom: value));
@@ -999,6 +1001,7 @@ class _CameraSettingsPanel extends ConsumerWidget {
                 min: 1.0,
                 max: 20.0,
                 onChanged: (value) {
+                  log('[CameraSettings] Zoom slider changed to $value');
                   ref
                       .read(cameraSettingsProvider.notifier)
                       .save(camera.copyWith(zoom: value));

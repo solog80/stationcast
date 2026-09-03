@@ -22,14 +22,20 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private lateinit var eventsChannel: EventChannel
     private lateinit var statsChannel: EventChannel
     private lateinit var histogramChannel: EventChannel
+    private lateinit var sipMethodChannel: MethodChannel
+    private lateinit var sipEventsChannel: EventChannel
+    private lateinit var sipStatsChannel: EventChannel
     // Use BroadcastEngine (StreamPack) — working Camera2 + TS + SRT
     private lateinit var engine: BroadcastEngine
+    private var sipEngine: SipEngine? = null
     private lateinit var applicationContext: Context
     private var talkbackPlayer: TalkbackAudioPlayer? = null
 
     private var eventSink: EventChannel.EventSink? = null
     private var statsSink: EventChannel.EventSink? = null
     private var histogramSink: EventChannel.EventSink? = null
+    private var sipEventSink: EventChannel.EventSink? = null
+    private var sipStatsSink: EventChannel.EventSink? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext = binding.applicationContext
@@ -78,6 +84,70 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         })
         engine.onHistogram = { bins -> histogramSink?.success(bins) }
 
+        // ---- SIP / EBU 3326 radio engine (audio-only, separate from camera) ----
+        sipEngine = SipEngine(applicationContext)
+        sipEngine?.listener = object : SipEngine.Listener {
+            override fun onEvent(state: String, peer: String?, message: String?) {
+                sipEventSink?.success(
+                    mapOf("state" to state, "peer" to peer, "message" to message)
+                )
+            }
+
+            override fun onStats(stats: Map<String, Any?>) {
+                sipStatsSink?.success(stats)
+            }
+        }
+
+        sipMethodChannel = MethodChannel(binding.binaryMessenger, "tv.stationcast/sip")
+        sipMethodChannel.setMethodCallHandler { call, result ->
+            val engine = sipEngine
+            if (engine == null) {
+                result.error("sip_error", "SIP engine not attached", null)
+                return@setMethodCallHandler
+            }
+            try {
+                when (call.method) {
+                    "initialize" -> engine.initialize()
+                    "register" -> engine.register(call.arguments as Map<*, *>)
+                    "accept" -> engine.accept()
+                    "decline" -> engine.decline()
+                    "hangup" -> engine.hangup()
+                    "dial" -> engine.dial(call.argument<String>("target") ?: "")
+                    "unregister" -> engine.unregister()
+                    "dispose" -> engine.dispose()
+                    else -> {
+                        result.notImplemented()
+                        return@setMethodCallHandler
+                    }
+                }
+                result.success(null)
+            } catch (t: Throwable) {
+                result.error("sip_error", t.message ?: t.toString(), null)
+            }
+        }
+
+        sipEventsChannel = EventChannel(binding.binaryMessenger, "tv.stationcast/sip/events")
+        sipEventsChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                sipEventSink = events
+            }
+
+            override fun onCancel(arguments: Any?) {
+                sipEventSink = null
+            }
+        })
+
+        sipStatsChannel = EventChannel(binding.binaryMessenger, "tv.stationcast/sip/stats")
+        sipStatsChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                sipStatsSink = events
+            }
+
+            override fun onCancel(arguments: Any?) {
+                sipStatsSink = null
+            }
+        })
+
         binding.platformViewRegistry.registerViewFactory(
             "tv.stationcast/camera_preview",
             CameraPreviewFactory(engine)
@@ -90,7 +160,10 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel.setMethodCallHandler(null)
+        sipMethodChannel.setMethodCallHandler(null)
         engine.scope.launch { engine.dispose() }
+        sipEngine?.dispose()
+        sipEngine = null
     }
 
     @SuppressLint("MissingPermission") // permissions are gated on the Dart side

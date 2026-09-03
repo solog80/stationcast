@@ -7,23 +7,8 @@ class AudioMeter extends StatelessWidget {
 
   final List<double> levelsDb;
 
-  static const _silent = -60.0;
-
-  static bool isSilent(List<double> levels) =>
-      levels.every((l) => l <= _silent + 0.01);
-
   @override
   Widget build(BuildContext context) {
-    if (isSilent(levelsDb)) {
-      return Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: ControlRoomColors.surface.withValues(alpha: 0.85),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: _IdleBars(),
-      );
-    }
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
@@ -39,49 +24,6 @@ class AudioMeter extends StatelessWidget {
           ],
         ],
       ),
-    );
-  }
-}
-
-class _IdleBars extends StatefulWidget {
-  @override
-  State<_IdleBars> createState() => _IdleBarsState();
-}
-
-class _IdleBarsState extends State<_IdleBars>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (context, _) {
-        final v = _ctrl.value * 0.12;
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _MeterBar(levelDb: -60.0 + v * 60),
-            const SizedBox(width: 3),
-            _MeterBar(levelDb: -60.0 + v * 60),
-          ],
-        );
-      },
     );
   }
 }

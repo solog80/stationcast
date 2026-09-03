@@ -28,7 +28,10 @@ import 'widgets/talkback_indicator.dart';
 // Static camera instance created once and never recreated
 
 class BroadcastScreen extends ConsumerStatefulWidget {
-  const BroadcastScreen({super.key});
+  const BroadcastScreen({super.key, this.onSwitchToRadio});
+
+  /// Optional handler to switch to the Radio/SIP page (shown as a chrome toggle).
+  final VoidCallback? onSwitchToRadio;
 
   @override
   ConsumerState<BroadcastScreen> createState() => _BroadcastScreenState();
@@ -278,6 +281,7 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
               setState(() => _cameraSettingsOpen = !_cameraSettingsOpen),
           onGoLive: _goLive,
           onOpenSettings: _openSettings,
+          onSwitchToRadio: widget.onSwitchToRadio,
         ),
       ),
     );
@@ -293,6 +297,7 @@ class _BroadcastLayout extends ConsumerWidget {
   final VoidCallback onCameraSettingsToggle;
   final VoidCallback onGoLive;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onSwitchToRadio;
 
   const _BroadcastLayout({
     required this.state,
@@ -303,6 +308,7 @@ class _BroadcastLayout extends ConsumerWidget {
     required this.onCameraSettingsToggle,
     required this.onGoLive,
     required this.onOpenSettings,
+    required this.onSwitchToRadio,
   });
 
   @override
@@ -345,6 +351,7 @@ class _BroadcastLayout extends ConsumerWidget {
                   feedState: feedState,
                   onGoLive: onGoLive,
                   onOpenSettings: onOpenSettings,
+                  onSwitchToRadio: onSwitchToRadio,
                 ),
 
                 // Floating return feed - separate from main layout
@@ -370,6 +377,7 @@ class _ChromeOverlay extends ConsumerWidget {
   final ReturnFeedUiState feedState;
   final VoidCallback onGoLive;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onSwitchToRadio;
 
   const _ChromeOverlay({
     required this.visible,
@@ -380,6 +388,7 @@ class _ChromeOverlay extends ConsumerWidget {
     required this.feedState,
     required this.onGoLive,
     required this.onOpenSettings,
+    required this.onSwitchToRadio,
   });
 
   @override
@@ -409,6 +418,15 @@ class _ChromeOverlay extends ConsumerWidget {
                   const SizedBox(width: 10),
                   const TalkbackIndicator(),
                   const Spacer(),
+                  if (onSwitchToRadio != null) ...[
+                    _SleekIconButton(
+                      icon: Icons.radio,
+                      active: false,
+                      tooltip: 'Radio',
+                      onPressed: onSwitchToRadio,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                   _SleekIconButton(
                     icon: Icons.picture_in_picture_alt,
                     active: feedState.visible,
@@ -730,6 +748,7 @@ class _OverlaysLayer extends ConsumerWidget {
   final ReturnFeedUiState feedState;
   final VoidCallback onGoLive;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onSwitchToRadio;
 
   const _OverlaysLayer({
     required this.chromeVisible,
@@ -740,6 +759,7 @@ class _OverlaysLayer extends ConsumerWidget {
     required this.feedState,
     required this.onGoLive,
     required this.onOpenSettings,
+    required this.onSwitchToRadio,
   });
 
   @override
@@ -759,6 +779,7 @@ class _OverlaysLayer extends ConsumerWidget {
           onCameraSettingsToggle: onCameraSettingsToggle,
           onGoLive: onGoLive,
           onOpenSettings: onOpenSettings,
+          onSwitchToRadio: onSwitchToRadio,
         ),
 
         // Camera controls strip — right edge in landscape

@@ -8,10 +8,13 @@ import '../models/destination_preset.dart';
 import '../models/encoder_settings.dart';
 import '../models/recording_settings.dart';
 import '../models/return_feed_config.dart';
+import '../models/sip_preset.dart';
+import '../radio/providers.dart';
 import '../services/auth_service.dart';
 import '../services/broadcast_reporter.dart';
 import '../theme/control_room_theme.dart';
 import 'widgets/camera_controls.dart';
+import 'widgets/sip_preset_editor.dart';
 
 export '../models/return_feed_config.dart' show SrtSenderMode;
 
@@ -68,6 +71,9 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
+          const SizedBox(height: 24),
+          _sectionHeader('Radio'),
+          _RadioLineCard(),
           const SizedBox(height: 24),
           _sectionHeader('Encoder'),
           _EncoderSection(encoder: encoder),
@@ -128,6 +134,40 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
+/// Compact card for the SIP/EBU 3326 radio line, opens the line editor.
+class _RadioLineCard extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final preset =
+        ref.watch(sipPresetProvider).valueOrNull ?? const SipPreset();
+    final status = !preset.enabled
+        ? 'Radio line off'
+        : !preset.isConfigured
+        ? 'Not configured'
+        : preset.displayTarget;
+    return Card(
+      color: ControlRoomColors.surface,
+      child: ListTile(
+        leading: Icon(
+          Icons.radio,
+          color: preset.enabled
+              ? ControlRoomColors.tallyRed
+              : ControlRoomColors.textSecondary,
+        ),
+        title: Text(preset.name),
+        subtitle: Text(
+          'SIP · $status',
+          style: const TextStyle(color: ControlRoomColors.textSecondary),
+        ),
+        trailing: const Icon(Icons.chevron_right, size: 18),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const SipPresetEditorScreen()),
+        ),
+      ),
+    );
+  }
+}
+
 class PresetEditorScreen extends StatefulWidget {
   const PresetEditorScreen({super.key, required this.preset});
 
@@ -135,9 +175,7 @@ class PresetEditorScreen extends StatefulWidget {
 
   @override
   State<PresetEditorScreen> createState() => _PresetEditorScreenState();
-}
-
-class _PresetEditorScreenState extends State<PresetEditorScreen> {
+}class _PresetEditorScreenState extends State<PresetEditorScreen> {
   final _formKey = GlobalKey<FormState>();
   late var _preset = widget.preset;
 

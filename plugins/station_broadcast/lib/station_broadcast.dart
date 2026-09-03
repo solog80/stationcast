@@ -6,6 +6,8 @@ import 'src/models.dart';
 
 export 'src/broadcast_events.dart';
 export 'src/models.dart';
+export 'src/sip_client.dart';
+export 'src/sip_models.dart';
 export 'src/native_camera_preview.dart';
 export 'src/native_srt_player.dart';
 

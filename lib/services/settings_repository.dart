@@ -7,6 +7,7 @@ import '../models/destination_preset.dart';
 import '../models/encoder_settings.dart';
 import '../models/recording_settings.dart';
 import '../models/return_feed_config.dart';
+import '../models/sip_preset.dart';
 
 /// JSON-in-SharedPreferences persistence for presets and settings.
 class SettingsRepository {
@@ -16,6 +17,7 @@ class SettingsRepository {
   static const _recordingKey = 'recording_settings';
   static const _cameraKey = 'camera_settings';
   static const _returnFeedKey = 'return_feed_config';
+  static const _sipKey = 'sip_preset';
 
   Future<List<DestinationPreset>> loadPresets() async {
     final prefs = await SharedPreferences.getInstance();
@@ -92,5 +94,17 @@ class SettingsRepository {
   Future<void> saveRecordingSettings(RecordingSettings settings) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_recordingKey, jsonEncode(settings.toJson()));
+  }
+
+  Future<SipPreset> loadSipPreset() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_sipKey);
+    if (raw == null) return const SipPreset();
+    return SipPreset.fromJson((jsonDecode(raw) as Map).cast<String, Object?>());
+  }
+
+  Future<void> saveSipPreset(SipPreset preset) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sipKey, jsonEncode(preset.toJson()));
   }
 }

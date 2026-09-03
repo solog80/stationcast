@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'services/auth_service.dart';
 import 'services/broadcast_reporter.dart';
 import 'theme/control_room_theme.dart';
-import 'ui/broadcast_screen.dart';
+import 'ui/home_screen.dart';
 import 'ui/login_screen.dart';
 import 'ui/onboarding/onboarding_screen.dart';
 
@@ -53,6 +53,6 @@ class _StationCastAppState extends ConsumerState<StationCastApp> {
   Widget _buildHome() {
     if (_onboardingComplete == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (!_onboardingComplete!) return OnboardingScreen(onComplete: () => setState(() => _onboardingComplete = true));
-    return _user != null ? const BroadcastScreen() : const LoginScreen();
+    return _user != null ? const HomeScreen() : const LoginScreen();
   }
 }

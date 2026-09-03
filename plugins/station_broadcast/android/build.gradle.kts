@@ -37,7 +37,8 @@ android {
 
     sourceSets {
         getByName("main") {
-            java.srcDirs("src/main/kotlin")
+            java.srcDirs("src/main/kotlin", "src/main/java")
+            jniLibs.srcDirs("src/main/jniLibs")
         }
         getByName("test") {
             java.srcDirs("src/test/kotlin")
@@ -46,6 +47,9 @@ android {
 
     defaultConfig {
         minSdk = 24
+        // Keep the pjsua2 SWIG binding + engine classes in release/minified builds
+        // (native libpjsua2.so reaches them by name via JNI).
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     testOptions {

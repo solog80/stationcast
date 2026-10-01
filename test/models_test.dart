@@ -50,6 +50,23 @@ void main() {
       expect(config.rtmpUrl, 'rtmp://x/live');
       expect(config.streamKey, 'key');
     });
+
+    test('WebRTC preset maps to WebRTC config and displays target', () {
+      const preset = DestinationPreset(
+        id: '3',
+        name: 'C',
+        protocol: BroadcastProtocol.webrtc,
+        webrtcUrl: 'ws://75.119.149.43:3333/app/stream',
+      );
+      final config = preset.toDestinationConfig();
+      expect(config.protocol, BroadcastProtocol.webrtc);
+      expect(config.webrtcUrl, 'ws://75.119.149.43:3333/app/stream');
+      expect(preset.displayTarget, 'ws://75.119.149.43:3333/app/stream');
+
+      final restored = DestinationPreset.fromJson(preset.toJson());
+      expect(restored.protocol, BroadcastProtocol.webrtc);
+      expect(restored.webrtcUrl, 'ws://75.119.149.43:3333/app/stream');
+    });
   });
 
   group('EncoderSettings', () {

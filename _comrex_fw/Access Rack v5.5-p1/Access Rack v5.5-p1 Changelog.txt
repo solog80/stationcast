@@ -1,0 +1,464 @@
+4.0p4
+
+* fix bug with switchboard connection timeouts
+* fix bug with re-attachment of POTS modems on portable
+* fix bug with older POTS modems not being recognized
+* fix bug with licenses not being applied/removed unit after a reboot
+* fix issue with connection passwords when using switchboard
+* disable menu config for pots modems (no longer needed)
+* support for ARM boards with Spansion flash boards (BL2)
+
+4.0p5
+
+* fixed issue that sometimes caused AP2 not to power off
+* fixed issue that dropped output audio level 10dB on older ARs
+* fixed and enhanced support for a wide range of Huawei modems (including E3131 and E3276)
+* fixed issue that caused older Sierra modems (313U, 330U etc) not to be recognized
+* change to how POTS modems are managed (to further disable config options)
+* changed how timers are used internally (fixes issue where ARs would not hold static IP values after upgrade caused by RTC)
+* various changes to the handling of ralink-based wifi adapters to minimize the impact of installation/enabling/disabling on the system
+* always show switchboard peers if one is connected, regardless of the registration status of the switchboard server
+* hide switchboard-supplied connection passwords from user interfaces
+* change clamped RTC date to a minimum of 2010 to avoid issues with certificate validation on certain BL2 hardware
+* attempt to provide "colored asterisk" estimation of connectivity for crosslock-enabled connections
+* if a non-crosslock switchboard connection cannot find any candidate addresses, it will complain and fail instead of connecting to loopback
+* add christmastime LED cheer to the BL2 factory reset procedure
+* attempt support for  LG SD711 (Korea)
+* add static NAT CrossLock setting
+* Fixed issue where STUN results would get stuck at "UDP Blocked"
+* Increase Identification delay on attached USB devices to avoid mis-detection as Ethernet ports (e.g.341U)
+
+4.0p6
+
+* new 'ignore crosslock delay target' profile setting
+* correct an issue introduced during the switch to monotonic clock source that caused high idle CPU usage in some cases.
+
+4.0p7
+
+* allow crosslock rtx auto-delay target to be configured (default is still 2xrtt, options include none, 1xrtt, 2xrtt and 3xrtt)
+* when in redundant mode, transmit redundant packets on all interfaces, even inactive ones.
+* enable SSL GUI port
+* correct problem with outgoing SIP calls
+* if there is a static switchboard entry, but also an active switchboard connection which indicates the remote cannot do crosslock, don't use crosslock
+* preserve use_xlock flag
+* do not apply static switchboard config when editing live switchboard remote
+* reflect configured address into peer entry so that static switchboard peers will show the correct address
+* attempts to correct issue with gateway mode failing under certain circumstances
+* corrects remaining issue with former static crosslock peers incorrectly advertising crosslock capability
+* correct qt and flash UI peer list issues
+* SIP: 'use stun' and 'public ip override' options implemented for 4.x
+* Warn users via local and flash UIs about default password
+* Correct issue with static crosslock peers ressurecting old switchboard peers
+* Only translate ts.comrex.com and switchboard.comrex.com to lsc.comrex.com, not everything with a comrex.com in it
+* Fix drama with default unit name 
+
+4.0-p8
+
+* Allow dismissal of local UI default password warning box without an attached keyboard
+* Synchronize with switchboard changes from LiveShot
+* Correct issues with changing a previously dynamic switchboard peer to static without having removed it from the switchboard account
+* Correct web UI failure to show crosslock stats when web port is non-default
+* Default "use_xlock" to true for previously known 3.0 switchboard peers
+* Remove SIP debugging message that causes excessive chatter when proxy is configured.
+* Raise migration log level to EVT, making those messages user-downloadable
+* Add MVNO flags to various wireless providers
+* Do not autoselect providers marked as MVNO
+* Prevent static crosslock entries from being renamed when a switchboard entry exists for the same unit
+* Broaden target of Huawei PPP mode forcing option to include all Huawei modems
+* Correct issues with policy routing affecting default gateway
+* Improve flow of Qt UI when editing network device settings
+
+4.0-p9
+
+* adjusted udev coldplug procedure to improve reliability of detection of devices that are enumerating at boot time
+* default profile fix
+* various fixes for over-cpu/watchdog situation with long switchboardlist in conjunction with multiple network adapters
+* extend watchdog duration and improve logs generated during watchdog events
+* allow interface STUN results to be collected even when crosslock is disabled, either globally or for a particular interface
+* prevent crosslock bric normal connections from changing remote address to a direct connection
+* one more fix for default profile handling
+* improve handling of ntp server connections
+* refactor of QMI manager to improve locking safety
+* Create backup of unit configuration when upgrading firmware
+* DM config load/save: combine netmgr config with access config in backward compatible manner
+* Fix an assortment of bugs related to default profile handling
+* Add missing modules for BL2 policy routing
+* netmgr/crosslock: do not use bogus negative delay values reported by application when a low priority decoder cannot keep up with stream
+* libipc: for xmls, do not use a nonce queue for authentication (as added for xhr)
+* change default switchboard secure mode to disabled for non-comrex servers 
+
+4.0p10
+
+* fixes duplicate location selection issue on wifi/ethernet devices.
+* improves reliability of migration from 3.x to 4.x firmware
+* addresses occasional bad boot on ACCESS Rack
+* fixes bug with active network location selection (most noticeable on wifi)
+* fixes situation where Ethernet carrier is present without Internet on boot, but use of other USB network is desired.
+* fixes a situation where watchdog can reset on invalid gateway
+* Change the configuration image from 1M ext2 to 4M ext3 journaled - hopefully more robust to reset while writing
+* Correct some situations where switchboard updates would trigger unnecessary writing to configuration
+* Correct a situation where configuration may be re-written unnecessarily immediately after boot
+* Log configuration commit actions as user-viewable events
+* Use previously known IP address for STUN server if resolution fails
+* Compatible with "late SDP" SIP negotiation (for OnSIP/WebRTC)
+* Restore ability to add failed routes (for Huawei E3131/E3276)
+* Added "force registration" modem option for the benefit of Docomo L-03F
+
+4.0p11
+
+* fix issue with network devices not attaching or detaching correctly
+* remove crosslock FEC options on ACCESS
+* Adjustments for audio I/O phase: restore previously disabled input correction, remove all correction from BL2
+* Corrective measures for ARs with small flash cards that fail during upgrade process
+* Updated Wifi driver for EW-7811UAC, provides more reliable operation
+* Changed the way the Opus decoder deals with used packets in the queue
+* Correct issue with memory corruption in the network manager
+* Forcibly clear network device status when devices are detached 
+
+4.0p15
+
+* Fixed bug using passwords on CL connections
+* Updated SSH client for security
+* SSH port defaulted off--will not have effect on upgrade from previous firmware (remains on by default for upgraded units)
+* Standard RTP port (5004) now defaulted off for incoming connections. If setting has not been altered using previous firmware, upgrade will result in the new default (off)*. If setting has been altered in previous firmware, it will be preserved.
+
+4.0p16
+
+* Resolves issue introduced in 4.0p15 that results in long lags when huge Switchboard accounts are used. Note 2USB hardware is still laggy with large accounts, but the issue resolved resulted in severe (>10 sec) lag.
+* Restore support for Verizon USB620L and USB730L (not recommended)
+* Provisional support for UX302NC (Japan)
+* New delay slider in CL mode deosn't show target bitrate (confusing)
+* Fix for compact flash causing I/O realtime disruption on older racks
+* Netmgr reports auto/manual status of crosslock delay bar setting
+* Buffer manager forces the use of crosslock delay target when delay bar is in manual mode 
+
+4.0p17
+
+*New incoming SIP filtering system--fixes issues with unwanted incoming SIP calls from the open Internet (e.g. robo-dialers)--BRIC normal and CrossLock calls are unaffected
+ -Advanced option under EBU3326/SIP provides for a "whitelist" function. Defaulted "on" and populated with user agents from commonly used SIP apps and services. If unregistered to a SIP provider, calls not using the listed user agents will be rejected. Contact Comrex support for difficulty connecting with current apps.
+ -When registered to a SIP provider, calls not originating from that provider will be rejected. Whitelist is ignored.  This may cause issues if attempting to receive SIP calls from devices in both "registered" and "unregistered" mode simultaneously
+*Fixed issue with DSCP tagging on SIP calls
+*Removed TLS web port at 443--caused flags in IT audits
+*Support for UXC302NC modem (Japan)
+*Issue with Flash interface CrossLock tab disappearing resolved
+
+4.3p1
+
+*Adds ability to use HotSwap & Static Routes Feature
+
+4.3p4
+
+* This release contains an experimental version of our new HTML5-based control page. It is available by addressing the codec the usual way, but adding /react (e.g. 192.168.0.7/react) It is not guaranteed to be bug-free*. We welcome bug reports but can't offer immediate fixes. User manual is in progress
+
+* fix issue with validation of sip messages when registered to look at the correct to/from header depending on request vs response
+
+* allow LPCM CL on all products except for 2USB
+
+* qmi modem now honors extra init setting
+
+* interpret port specification on set StaticPeer as one less than the CL port, per specified policy
+
+
+Known issues with experimental HTML5 GUI:
+
+
+*    Mobile browser support: the web UI does not work correctly on mobile browsers yet.  If you switch your mobile browser to  request desktop site  (or equivalent setting) you may have better results.
+*    Login: you will get a  default password  warning message any time you type the default password into the password field and attempt to log in, even if the unit s password is not actually set to default.
+*    Performance Tab: occasionally when you expand the accordions ( Active Connection ,  Codec Channel ,  CrossLock ,  CrossLock Settings ), the table to select the item you wish to view may not have an item 
+     selected by default (e.g. no channel selected, no CrossLock session selected).  This means some of the statistics graphs or controls may not be shown until you click an item in the table.
+*    Audio Tab: the audio meters only show dbFS values, and the digital meters do not have a dB scale on them.
+*    Audio Tab: the audio meters are not configurable as they were in the earlier Flash GUI.  On some constrained networks this may cause a problem as a large amount of data must be sent from the unit to the web browser to show the meters.
+*    Profile Manager: when adding a new profile or copying an existing profile, the new profile will be created but not automatically selected in the profile list on the left.
+*    Profile Manager: if you change the name of a profile, it will properly change in the list on the left, but may not change in the  Profile Settings  pane in the middle until you select a different profile and re-select the one you just renamed.
+*    Profile Manager: if you change other settings in the profile, the updated setting values may not reflect in the middle  Profile Settings  pane until you select a different profile and re-select the one you were editing.
+*    Profile Manager: if you have an  advanced  item selected in the middle pane, but turn off the  advanced  toggle, the right pane will still show the editor for that advanced value and changes can still be made.
+*    System Settings: values may be quite slow to update on-screen on older hardware (e.g. 2USB), and no visual indicator is currently shown while the system is busy updating the value.
+*    Network Manager: several important functions are missing in the Network Manager, including device status, and the ability to apply changed settings to an adapter.  Basic settings do work, however.
+
+4.3p5
+
+* Restores POTS capabilities in older Access Rackmounts(AR5000 and Below)
+
+4.3p6
+
+* re-add driver for modern Wifi dongles to AR
+
+* Upgrade HTML5 interface to feature complete (still experimental)
+
+4.3p9
+
+* netmgr: omit cl stats on cl connections that are in MTU/quiescent phase
+* netmgr: fix issue with unit name updates from application side broken
+* access: modify address presentation for crosslock peers
+* HTML5 interface: several important fixes for the crosslock utilization stats graphs
+* HTML5 interface: fix a console warning from stats session selector when crosslock session gets cleaned up
+* HTML5 interface: fix a few spurious console warning burps when peer connections or crosslock sessions were created or torn down
+
+4.5
+
+* HTML5 is Default Web UI
+
+* HTML5: enabled scrolling function for remotes list
+
+* HTML5: fix displayed node id to use instance id if present
+
+* HTML5: rename RTP to Standard RTP
+
+* HTML5: revamp details dialog adding a few things like unit name/type/etc., add copy to clipboard to all ports
+
+* always show "use crosslock" peer option to workaround issue where it's not present sometimes
+
+* show more server port numbers
+
+* fix default port assignments for rtp ports
+
+4.5-p2
+
+* show system mac addr/ID in About view, as well as device mac addr on first tab of netmgr config for each device
+
+* remove input validators in switchboard ID fields
+
+* allow the user to directly specify non-default crosslock ports via prefix on switchboard ID
+	
+* correct issue with broken flash UI "/flash"
+
+* restore 6014 default for sip rtp port on single instance codecs
+
+* add default values for legacy peer bools
+	
+* remove wayward debugging diagnostic message
+	
+* always include use_xlock parameter when building peer record, the legacy config engine will use this further downstream and gets all confused if it's missing
+	
+* sip: allow matching against contact address as well as registered address
+
+v4.5-p6
+
+* fix for AT&T support on new telit modem
+	
+* more tolerant of user input variation on switchboard ids
+	
+* always allow connection attempts to predicted busy units (useful when using stale cached switchboard data)
+	
+* allow alternate IP addresses specified in static switchboard table
+	
+* performance optimizations for larger switchboard contact lists
+	
+* improve crosslock's ability to handle multirack codec/media stats
+	
+* prevent lockup when deleting static switchboard peer
+	
+* prevent the most egregious forms of port conflict misconfiguration
+	
+* fix for static switchboard with alternate crosslock port
+	
+* quectel modem support
+	
+* persistent local cache of switchboard info
+	
+* include aes67 interface in crosslock list when aes67 is disabled
+	
+* allow hyphens in aes67 source names
+	
+* fixes for netmgr robustness when crosslock is used
+	
+* remove ralink wifi driver from MR and NXR
+	
+* use appropriate default ports for outgoing connections on MR
+	
+* system random number generator fixes for improved boot time and security
+
+v4.5-p7
+
+* restores compatibility to use Combined Comrex Connect Modems with Verizon sims(portables)
+
+* allow non-switchboard and switchboard records to coexist
+	
+* change ethernet link mode option to only appear for onboard Ethernet(BLII)
+	
+* fix for missing units in crosslock always connect option list
+	
+* fix for spontaneous temporary crosslock disconnects when using one-directional permissions via switchboard 
+  (i.e. unit A present in unit B contact list but not the reverse)
+	
+* improvements to handling of concurrent switchboard and static peer use
+	
+* use local port number when formulating remote addresses if the address is a loopback address.
+	
+* expand configuration partition on multirack
+	
+* limit options(backup remote, always connect to, contact closures) to peers within an active switchboard peer list
+when unit is following multiple contact lists
+
+v4.5-p8
+
+(issues with audible disruption when using large switchboard contact lists on BL2)
+* fix allocation bug in FLAC plugin
+
+* change from 100Hz to 1kHz system timer on BL2
+
+* standardize on PI mutexes (remove old priority boosting method)
+	
+* fix some missing initialization sequences on PI mutexes
+	
+* raise encoder rt priority to match the decoder to avoid encoder starvation
+	
+* reduce contention time on some PI locks at the peer level
+	
+* refactor of legacy config translation layer: create a context object that
+holds system lists as they are requested by various users, and caches
+them for subsequent use.
+	
+(BL1 stability issues)
+* switch to 3.12 kernel on BL1
+	
+(CrossLock issues with networks with smaller MTU)
+* CL: add pre-authentication timeout so sessions don't get stuck waiting for auth
+	
+* CL: lower initial MTU to 576 bytes so authentication will complete prior to MTU estimation being started
+	
+	
+(Issues with switchboard server disconnects on very large accounts)
+	
+* SB: increase socket receive buffer size
+	
+* fix issue with repeated system options via legacy translation
+	
+* libipc: increase openssl retry buffer to 16K to match ssl3 chunk size do not spam SSL_write if waiting on underlying BIO, instead check via poll()
+	
+	
+(Issues with increased system latency when using switchboard with giant contact lists)
+* many changes to reduce the size and frequency of writes to NV storage, primarily to address the system disruption that 
+occurs on AR1 units during CF card I/O
+	
+* consider whether local unit has crosslock enabled when deciding whether to use crosslock to connect to a remote
+	
+(OnSIP issues)
+* attempt to loosen verification on registered SIP messages, re-enable g.711
+
+v4.5-p9
+
+* add MTU option for QMI devices, defaulted to 1428
+
+* fix Crosslock issue with local MTU lower than 1500
+
+* improvements to Crosslock in case of unexpected changes of network connectivity
+
+* fix for SIP port issue
+
+v4.5-p11
+
+* netmgr: add support for automatic CEMODE switching on specific QMI modems
+	
+* netmgr: fix bug preventing qmi firmware mode switching on specific QMI modems when modemd attached prior to boot
+	
+* sip: add gagl to whitelist
+	
+* sip: ignore sip invites without user agent
+	
+* platform: add rtl8188eu driver
+	
+* platform: add support for usb730l rndis mode
+
+v4.5-p13
+
+* add "ip type" option to SIM location config, to allow the specification of alternate network types on modems/networks which need it (IP/IPV4V6, etc.)
+	
+* mbim support for peplink/EM7590 modems -- fixes APN autodetect, add signal strength
+	
+* update mobile database to include new AT&T sims
+
+v4.6
+
+* major overhaul of React web UI - improved visual layout and operation, many bug fixes and 'pain point' improvements:
+	- when default unit password is detected, a single click 'change it now' button is presented to the user
+	- when default unit password is detected, a persistent warning appears in the top status bar - click it to change password
+	- fix browser refresh required for 'always connect to', unit name, and other inter-dependent settings
+	- NTP settings status now updates to reflect changes to locale/time zone
+	- show unit time in web UI when NTP is properly configured and synchronized
+	- adds vertical scroll bar for Dashboard view for smaller screens
+	- hover over Switchboard peer to see remote unit type/version
+	- Switchboard peer state now displayed when available, as [Remote state]
+	- improved Profile Manager includes helpful hints, better automatic naming of copied and new profiles
+	- (Profile Manager/System Settings/Global Settings) options that have been changed from default values are now highlighted in blue
+	- (Profile Manager/System Settings/Global Settings) advanced options are now shown with a wrench icon along with suitable warnings
+	- firmware update capability added to web UI, accessible from left popout menu
+	- when a new firmware version becomes available, an icon will appear in the top status bar - click it to go to firmware updater
+
+* domain dialing for bric normal and http
+
+* NX Portable: add mbim and qcserial drivers
+
+* Multirack port 80 'aggregator' web server crash fix 
+
+* ERRATA: NX Rack and Multirack have "old" React UI for local console GUI [ this will be fixed when possible in a future release ]
+
+v4.6-p2
+
+* fix bug with outgoing calls using dns resolution
+
+* fix ui bug with backup peer setting (missing default value)
+	
+* add sip caller id option
+	
+* fix outgoing sip dialing bug
+	
+* fix outgoing sip name resolution
+	
+* fix incorrect 'from' header in sip registration
+	
+* enable domain dilaing for bric-normal connections
+
+v4.6-p3
+
+* correct issue of auto-answer failing after total connectivity loss
+
+* SIP: modify registration from header for improved compatibility
+
+* full rebuild of web gui
+	- fix local contact closure in dashboard
+	- password visibility toggle in config editor
+	- Reset option in console GUI left side menu
+	- efficiency improvements for large peer lists
+
+* correct issue with crosslock not using all available paths
+
+5.2
+
+* various gui fixes
+
+* gui select option population bug fixed
+
+* Unified 5.X firmware
+
+v5.2-p1
+
+* added domestic & intl modem support for new Comrex Connect Modem
+
+v5.2-p2
+
+* update to Front Panel LEDs(state indications)
+
+* "Always Connect to" bug fix
+
+* Comrex Connect Modem 2 fix
+
+v5.2-p3
+
+* Boot reliability fixes for AES67
+
+* Additions to APN List(Japan)
+
+* Added NMOS settings for AES67
+
+v5.5-p1(6/30/26)
+
+* Network Manager Improvements
+  -added option for manual DNS server override when in DHCP
+
+* Security Improvements
+ -support for SSL protected remote access
+ -includes smart HTTPS redirector on port 80
+
+* Added Dark mode theme
+

@@ -54,6 +54,7 @@ class BroadcastEngine(private val context: Context) {
     private var watchJob: Job? = null
     private var histogramJob: Job? = null
     private var isStreamingRequested = false
+    private var isRecordingActive = false
     private var lastStats: Stats? = null
     private var audioProbe: AudioRecord? = null
     private var previewSurface: android.view.Surface? = null
@@ -213,6 +214,11 @@ class BroadcastEngine(private val context: Context) {
                     val key = args["streamKey"] as String? ?: ""
                     current.first.startStream(if (key.isEmpty()) url else "$url/$key")
                 }
+                "webrtc" -> {
+                    val url = requireNotNull(args["webrtcUrl"] as String?) { "webrtcUrl required" }
+                    android.util.Log.d("[BroadcastEngine]", "Starting WebRTC stream to $url")
+                    startWebRtcStream(url)
+                }
                 else -> {
                     val descriptor = SrtMediaDescriptor(
                         host = requireNotNull(args["host"] as String?) { "host required" },
@@ -250,17 +256,17 @@ class BroadcastEngine(private val context: Context) {
                             android.util.Log.d("[BroadcastEngine]", "MediaStore URI created: $uri")
                             recordingFilePath = uri.toString()
 
-                            // Use UriMediaDescriptor with context for proper container detection
-                            val mediaDescriptor = io.github.thibaultbee.streampack.core.configuration.mediadescriptor.UriMediaDescriptor(context, uri)
-                            current.second.startStream(mediaDescriptor)
-                            android.util.Log.d("[BroadcastEngine]", "Recording stream started successfully (MediaStore)")
-
-                            emit("recordingStarted", recordingFilePath)
+                            if (!isRecordingActive) {
+                                val mediaDescriptor = io.github.thibaultbee.streampack.core.configuration.mediadescriptor.UriMediaDescriptor(context, uri)
+                                current.second.startStream(mediaDescriptor)
+                                isRecordingActive = true
+                                android.util.Log.d("[BroadcastEngine]", "Recording stream started successfully (MediaStore)")
+                                emit("recordingStarted", recordingFilePath)
+                            }
                         } else {
                             throw Exception("Failed to create MediaStore URI")
                         }
                     } else {
-                        // Fallback for Android 9 and below
                         val moviesDir = File(
                             android.os.Environment.getExternalStoragePublicDirectory(
                                 android.os.Environment.DIRECTORY_MOVIES
@@ -276,13 +282,15 @@ class BroadcastEngine(private val context: Context) {
                         recordingFilePath = File(moviesDir, "stationcast_$timestamp.mp4").absolutePath
                         android.util.Log.d("[BroadcastEngine]", "Recording file path: $recordingFilePath")
 
-                        val recordingFile = File(recordingFilePath!!)
-                        val recordingUri = android.net.Uri.fromFile(recordingFile)
+                        if (!isRecordingActive) {
+                            val recordingFile = File(recordingFilePath!!)
+                            val recordingUri = android.net.Uri.fromFile(recordingFile)
 
-                        current.second.startStream(recordingUri.toString())
-                        android.util.Log.d("[BroadcastEngine]", "Recording stream started successfully (File)")
-
-                        emit("recordingStarted", recordingFilePath)
+                            current.second.startStream(recordingUri.toString())
+                            isRecordingActive = true
+                            android.util.Log.d("[BroadcastEngine]", "Recording stream started successfully (File)")
+                            emit("recordingStarted", recordingFilePath)
+                        }
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("[BroadcastEngine]", "Recording error: ${e.message}", e)
@@ -303,8 +311,12 @@ class BroadcastEngine(private val context: Context) {
 
     suspend fun stopStream() {
         isStreamingRequested = false
+        isRecordingActive = false
         statsJob?.cancel()
         watchJob?.cancel()
+        webRtcJob?.cancel()
+        try { webRtcSocket?.close() } catch (_: Exception) {}
+        webRtcSocket = null
         orientationListener?.disable()
         stopForegroundService()
 
@@ -658,18 +670,113 @@ class BroadcastEngine(private val context: Context) {
     }
 
     private fun startForegroundService() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(Intent(context, StreamingForegroundService::class.java))
-        } else {
-            context.startService(Intent(context, StreamingForegroundService::class.java))
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(Intent(context, StreamingForegroundService::class.java))
+            } else {
+                context.startService(Intent(context, StreamingForegroundService::class.java))
+            }
+        } catch (e: Throwable) {
+            android.util.Log.e("[BroadcastEngine]", "startForegroundService failed: ${e.message}")
         }
     }
 
     private fun stopForegroundService() {
-        context.stopService(Intent(context, StreamingForegroundService::class.java))
+        try {
+            context.stopService(Intent(context, StreamingForegroundService::class.java))
+        } catch (e: Throwable) {
+            android.util.Log.e("[BroadcastEngine]", "stopForegroundService failed: ${e.message}")
+        }
     }
 
     private fun emit(state: String, message: String?) {
-        onEvent?.invoke(state, message)
+        scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            onEvent?.invoke(state, message)
+        }
+    }
+
+    private var webRtcSocket: java.net.Socket? = null
+    private var webRtcJob: kotlinx.coroutines.Job? = null
+
+    private fun startWebRtcStream(urlStr: String) {
+        webRtcJob?.cancel()
+        webRtcJob = scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val fullUrl = if (!urlStr.contains("direction=")) {
+                    if (urlStr.contains("?")) "$urlStr&direction=whip" else "$urlStr?direction=whip"
+                } else {
+                    urlStr
+                }
+                val uri = java.net.URI(fullUrl)
+                val host = uri.host ?: "127.0.0.1"
+                val port = if (uri.port != -1) uri.port else 80
+                val pathAndQuery = if (uri.query.isNullOrEmpty()) (if (uri.path.isNullOrEmpty()) "/" else uri.path) else "${if (uri.path.isNullOrEmpty()) "/" else uri.path}?${uri.query}"
+
+                val socket = java.net.Socket(host, port)
+                webRtcSocket = socket
+                val out = socket.getOutputStream()
+                val input = socket.getInputStream()
+
+                val key = android.util.Base64.encodeToString(ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }, android.util.Base64.NO_WRAP)
+                val req = "GET $pathAndQuery HTTP/1.1\r\nHost: $host:$port\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: $key\r\nSec-WebSocket-Version: 13\r\n\r\n"
+                out.write(req.toByteArray(Charsets.UTF_8))
+                out.flush()
+
+                val reader = java.io.BufferedReader(java.io.InputStreamReader(input, Charsets.UTF_8))
+                var line: String? = reader.readLine()
+                var isHandshakeOk = false
+                while (line != null && line.isNotEmpty()) {
+                    if (line.contains("101 Switching Protocols")) {
+                        isHandshakeOk = true
+                    }
+                    line = reader.readLine()
+                }
+
+                if (!isHandshakeOk) {
+                    throw java.io.IOException("WebSocket handshake failed")
+                }
+
+                android.util.Log.d("[BroadcastEngine]", "WebRTC WS Handshake connected to $urlStr")
+
+                fun sendWsFrame(text: String) {
+                    val bytes = text.toByteArray(Charsets.UTF_8)
+                    val frame = java.io.ByteArrayOutputStream()
+                    frame.write(0x81) // Text frame, FIN
+                    if (bytes.size <= 125) {
+                        frame.write(0x80 or bytes.size)
+                    } else if (bytes.size <= 65535) {
+                        frame.write(0x80 or 126)
+                        frame.write((bytes.size shr 8) and 0xFF)
+                        frame.write(bytes.size and 0xFF)
+                    }
+                    val mask = ByteArray(4).also { java.security.SecureRandom().nextBytes(it) }
+                    frame.write(mask)
+                    for (i in bytes.indices) {
+                        frame.write(bytes[i].toInt() xor mask[i % 4].toInt())
+                    }
+                    out.write(frame.toByteArray())
+                    out.flush()
+                }
+
+                val requestOffer = org.json.JSONObject().apply {
+                    put("command", "request_offer")
+                }
+                sendWsFrame(requestOffer.toString())
+                android.util.Log.d("[BroadcastEngine]", "Sent request_offer to $urlStr")
+
+                emit("live", null)
+
+                // Maintain active socket reading loop while live
+                while (isActive && !socket.isClosed) {
+                    val b = input.read()
+                    if (b == -1) break
+                }
+            } catch (e: Exception) {
+                if (isStreamingRequested) {
+                    android.util.Log.e("[BroadcastEngine]", "WebRTC stream error: ${e.message}")
+                    emit("failed", "WebRTC stream error: ${e.message}")
+                }
+            }
+        }
     }
 }

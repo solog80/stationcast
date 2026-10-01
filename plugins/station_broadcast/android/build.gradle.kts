@@ -87,10 +87,12 @@ dependencies {
     implementation("io.github.thibaultbee.streampack:streampack-core:3.1.2")
     implementation("io.github.thibaultbee.streampack:streampack-srt:3.1.2")
     implementation("io.github.thibaultbee.streampack:streampack-ui:3.1.2")
-    implementation("io.github.thibaultbee.srtdroid:srtdroid-core:+")
-    implementation("io.github.thibaultbee.srtdroid:srtdroid-ktx:+")
+    implementation("io.github.thibaultbee.srtdroid:srtdroid-core:1.9.0")
+    implementation("io.github.thibaultbee.srtdroid:srtdroid-ktx:1.9.0")
 
-    // Video encoding and playback
+    // WebRTC for WHIP
+    implementation("io.getstream:stream-webrtc-android:1.3.0")
+
     implementation("androidx.media:media:1.7.0")
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")

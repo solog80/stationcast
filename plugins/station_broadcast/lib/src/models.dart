@@ -2,7 +2,7 @@
 enum BroadcastVideoCodec { h264, hevc }
 
 /// Transport protocol for the outgoing stream.
-enum BroadcastProtocol { srt, rtmp }
+enum BroadcastProtocol { srt, rtmp, webrtc }
 
 /// Encoder configuration applied when the engine is initialized (and
 /// re-applied on [StationBroadcast.initialize] calls).
@@ -34,7 +34,7 @@ class EncoderConfig {
 }
 
 /// Where to send the stream. For SRT the URL is assembled natively from the
-/// individual parts; for RTMP provide [rtmpUrl] + [streamKey].
+/// individual parts; for RTMP provide [rtmpUrl] + [streamKey]; for WebRTC provide [webrtcUrl].
 class DestinationConfig {
   const DestinationConfig.srt({
     required this.host,
@@ -44,7 +44,8 @@ class DestinationConfig {
     this.latencyMs = 200,
   })  : protocol = BroadcastProtocol.srt,
         rtmpUrl = null,
-        streamKey = null;
+        streamKey = null,
+        webrtcUrl = null;
 
   const DestinationConfig.rtmp({
     required this.rtmpUrl,
@@ -54,7 +55,19 @@ class DestinationConfig {
         port = null,
         streamId = null,
         passphrase = null,
-        latencyMs = 0;
+        latencyMs = 0,
+        webrtcUrl = null;
+
+  const DestinationConfig.webrtc({
+    required this.webrtcUrl,
+  })  : protocol = BroadcastProtocol.webrtc,
+        host = null,
+        port = null,
+        streamId = null,
+        passphrase = null,
+        latencyMs = 0,
+        rtmpUrl = null,
+        streamKey = null;
 
   final BroadcastProtocol protocol;
   final String? host;
@@ -64,6 +77,7 @@ class DestinationConfig {
   final int latencyMs;
   final String? rtmpUrl;
   final String? streamKey;
+  final String? webrtcUrl;
 
   Map<String, Object?> toMap() => {
         'protocol': protocol.name,
@@ -74,6 +88,7 @@ class DestinationConfig {
         'latencyMs': latencyMs,
         'rtmpUrl': rtmpUrl,
         'streamKey': streamKey,
+        'webrtcUrl': webrtcUrl,
       };
 }
 

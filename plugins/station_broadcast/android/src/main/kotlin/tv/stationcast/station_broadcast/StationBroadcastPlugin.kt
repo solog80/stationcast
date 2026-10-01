@@ -27,6 +27,7 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private lateinit var sipStatsChannel: EventChannel
     // Use BroadcastEngine (StreamPack) — working Camera2 + TS + SRT
     private lateinit var engine: BroadcastEngine
+    private lateinit var whipEngine: WhipEngine
     private var sipEngine: SipEngine? = null
     private lateinit var applicationContext: Context
     private var talkbackPlayer: TalkbackAudioPlayer? = null
@@ -41,9 +42,28 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         applicationContext = binding.applicationContext
         engine = BroadcastEngine(applicationContext)
         engine.onEvent = { state, message ->
-            eventSink?.success(mapOf("state" to state, "message" to message))
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                eventSink?.success(mapOf("state" to state, "message" to message))
+            }
         }
-        engine.onStats = { stats -> statsSink?.success(stats) }
+        engine.onStats = { stats ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                statsSink?.success(stats)
+            }
+        }
+
+        whipEngine = WhipEngine(applicationContext)
+        whipEngine.onEvent = { state, message ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                eventSink?.success(mapOf("state" to state, "message" to message))
+            }
+        }
+        whipEngine.onStats = { stats ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                statsSink?.success(stats)
+            }
+        }
+
 
         methodChannel = MethodChannel(binding.binaryMessenger, "tv.stationcast/broadcast")
         methodChannel.setMethodCallHandler(this)
@@ -150,7 +170,7 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
         binding.platformViewRegistry.registerViewFactory(
             "tv.stationcast/camera_preview",
-            CameraPreviewFactory(engine)
+            CameraPreviewFactory(engine, whipEngine)
         )
         binding.platformViewRegistry.registerViewFactory(
             "tv.stationcast/srt_player",
@@ -174,10 +194,22 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(null)
             }
             "startStream" -> launchCatching(result) {
-                engine.startStream(call.arguments as Map<*, *>)
+                val args = call.arguments as Map<*, *>
+                val protocol = args["protocol"] as String?
+                if (protocol == "webrtc") {
+                    val webrtcUrl = args["webrtcUrl"] as String? ?: ""
+                    val width = (args["width"] as Number? ?: 1280).toInt()
+                    val height = (args["height"] as Number? ?: 720).toInt()
+                    val fps = (args["fps"] as Number? ?: 30).toInt()
+                    val bps = (args["videoBitrateBps"] as Number? ?: 3_000_000).toInt()
+                    whipEngine.startWhipStream(webrtcUrl, width, height, fps, bps)
+                } else {
+                    engine.startStream(args)
+                }
                 result.success(null)
             }
             "stopStream" -> launchCatching(result) {
+                whipEngine.stopWhipStream()
                 engine.stopStream()
                 result.success(null)
             }

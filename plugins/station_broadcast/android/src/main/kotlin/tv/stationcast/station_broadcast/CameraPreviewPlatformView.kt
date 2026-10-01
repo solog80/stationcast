@@ -9,7 +9,8 @@ import io.flutter.plugin.platform.PlatformViewFactory
 
 class CameraPreviewPlatformView(
     context: Context,
-    private val engine: BroadcastEngine
+    private val engine: BroadcastEngine,
+    private val whipEngine: WhipEngine? = null
 ) : PlatformView {
     private val surfaceView = SurfaceView(context)
     init {
@@ -17,6 +18,7 @@ class CameraPreviewPlatformView(
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
                 engine.setPreviewSurface(holder.surface)
+                whipEngine?.setPreviewSurface(holder.surface)
                 val res = engine.getCameraResolution()
                 if (res.isNotEmpty()) {
                     val w = res["width"]?.toInt() ?: return
@@ -27,6 +29,7 @@ class CameraPreviewPlatformView(
             override fun surfaceChanged(holder: SurfaceHolder, fmt: Int, w: Int, h: Int) {}
             override fun surfaceDestroyed(holder: SurfaceHolder) {
                 engine.setPreviewSurface(null)
+                whipEngine?.setPreviewSurface(null)
             }
         })
     }
@@ -35,8 +38,9 @@ class CameraPreviewPlatformView(
 }
 
 class CameraPreviewFactory(
-    private val engine: BroadcastEngine
+    private val engine: BroadcastEngine,
+    private val whipEngine: WhipEngine? = null
 ) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView =
-        CameraPreviewPlatformView(context, engine)
+        CameraPreviewPlatformView(context, engine, whipEngine)
 }

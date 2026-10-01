@@ -26,6 +26,7 @@ final class BroadcastEngine {
     private var rtmpConnection: RTMPConnection?
     private var rtmpStream: RTMPStream?
     #endif
+    private var webRtcTask: URLSessionWebSocketTask?
 
     private var currentPosition: AVCaptureDevice.Position = .back
     private var _currentCamera: AVCaptureDevice?
@@ -151,6 +152,8 @@ final class BroadcastEngine {
         do {
             if (args["protocol"] as? String) == "rtmp" {
                 try await startRtmp(args: args)
+            } else if (args["protocol"] as? String) == "webrtc" {
+                try await startWebrtc(args: args)
             } else {
                 try await startSrt(args: args)
             }
@@ -245,6 +248,30 @@ final class BroadcastEngine {
             domain: "station_broadcast", code: 3,
             userInfo: [NSLocalizedDescriptionKey: "RTMP module not available in this build"])
         #endif
+    }
+
+    private func startWebrtc(args: [String: Any?]) async throws {
+        guard let urlString = args["webrtcUrl"] as? String else {
+            throw NSError(domain: "station_broadcast", code: 1, userInfo: [NSLocalizedDescriptionKey: "webrtcUrl required"])
+        }
+        var fullUrlString = urlString
+        if !fullUrlString.contains("direction=") {
+            fullUrlString += fullUrlString.contains("?") ? "&direction=whip" : "?direction=whip"
+        }
+        guard let url = URL(string: fullUrlString) else {
+            throw NSError(domain: "station_broadcast", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid WebRTC URL: \(fullUrlString)"])
+        }
+        let session = URLSession(configuration: .default)
+        let task = session.webSocketTask(with: url)
+        task.resume()
+        webRtcTask = task
+
+        let requestOffer: [String: Any] = ["command": "request_offer"]
+        if let jsonData = try? JSONSerialization.data(withJSONObject: requestOffer), let jsonString = String(data: jsonData, encoding: .utf8) {
+            let message = URLSessionWebSocketTask.Message.string(jsonString)
+            try await task.send(message)
+            dlog("Sent request_offer to \(urlString)")
+        }
     }
 
     func stopStream() async {

@@ -13,6 +13,7 @@ class DestinationPreset {
     this.latencyMs = 200,
     this.rtmpUrl = '',
     this.streamKey = '',
+    this.webrtcUrl = '',
   });
 
   final String id;
@@ -25,6 +26,7 @@ class DestinationPreset {
   final int latencyMs;
   final String rtmpUrl;
   final String streamKey;
+  final String webrtcUrl;
 
   DestinationConfig toDestinationConfig() {
     switch (protocol) {
@@ -38,6 +40,8 @@ class DestinationPreset {
         );
       case BroadcastProtocol.rtmp:
         return DestinationConfig.rtmp(rtmpUrl: rtmpUrl, streamKey: streamKey);
+      case BroadcastProtocol.webrtc:
+        return DestinationConfig.webrtc(webrtcUrl: webrtcUrl);
     }
   }
 
@@ -51,6 +55,7 @@ class DestinationPreset {
     int? latencyMs,
     String? rtmpUrl,
     String? streamKey,
+    String? webrtcUrl,
   }) =>
       DestinationPreset(
         id: id,
@@ -63,6 +68,7 @@ class DestinationPreset {
         latencyMs: latencyMs ?? this.latencyMs,
         rtmpUrl: rtmpUrl ?? this.rtmpUrl,
         streamKey: streamKey ?? this.streamKey,
+        webrtcUrl: webrtcUrl ?? this.webrtcUrl,
       );
 
   Map<String, Object?> toJson() => {
@@ -76,6 +82,7 @@ class DestinationPreset {
         'latencyMs': latencyMs,
         'rtmpUrl': rtmpUrl,
         'streamKey': streamKey,
+        'webrtcUrl': webrtcUrl,
       };
 
   static DestinationPreset fromJson(Map<String, Object?> json) => DestinationPreset(
@@ -92,10 +99,18 @@ class DestinationPreset {
         latencyMs: (json['latencyMs'] as num?)?.toInt() ?? 200,
         rtmpUrl: json['rtmpUrl'] as String? ?? '',
         streamKey: json['streamKey'] as String? ?? '',
+        webrtcUrl: json['webrtcUrl'] as String? ?? '',
       );
 
-  /// Short human-readable target, e.g. `srt://10.0.0.5:8890`.
-  String get displayTarget => protocol == BroadcastProtocol.srt
-      ? 'srt://$host:$port'
-      : rtmpUrl;
+  /// Short human-readable target, e.g. `srt://10.0.0.5:8890` or `ws://...`.
+  String get displayTarget {
+    switch (protocol) {
+      case BroadcastProtocol.srt:
+        return 'srt://$host:$port';
+      case BroadcastProtocol.rtmp:
+        return rtmpUrl;
+      case BroadcastProtocol.webrtc:
+        return webrtcUrl;
+    }
+  }
 }

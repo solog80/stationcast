@@ -216,6 +216,10 @@ class PresetEditorScreen extends StatefulWidget {
                   value: BroadcastProtocol.rtmp,
                   label: Text('RTMP'),
                 ),
+                ButtonSegment(
+                  value: BroadcastProtocol.webrtc,
+                  label: Text('WebRTC'),
+                ),
               ],
               selected: {_preset.protocol},
               onSelectionChanged: (selection) => setState(
@@ -223,11 +227,31 @@ class PresetEditorScreen extends StatefulWidget {
               ),
             ),
             const SizedBox(height: 12),
-            if (isSrt) _srtFields() else _rtmpFields(),
+            switch (_preset.protocol) {
+              BroadcastProtocol.srt => _srtFields(),
+              BroadcastProtocol.rtmp => _rtmpFields(),
+              BroadcastProtocol.webrtc => _webrtcFields(),
+            },
             const SizedBox(height: 12),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _webrtcFields() {
+    return Column(
+      children: [
+        TextFormField(
+          initialValue: _preset.webrtcUrl,
+          decoration: const InputDecoration(
+            labelText: 'WebRTC WebSocket / WHEP URL',
+            hintText: 'e.g. ws://75.119.149.43:3333/app/stream',
+          ),
+          validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+          onSaved: (v) => _preset = _preset.copyWith(webrtcUrl: v),
+        ),
+      ],
     );
   }
 

@@ -1,40 +1,41 @@
 package tv.stationcast.station_broadcast
 
 import android.content.Context
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.view.View
 import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
+import org.webrtc.RendererCommon
+import org.webrtc.SurfaceViewRenderer
 
 class CameraPreviewPlatformView(
     context: Context,
     private val engine: BroadcastEngine,
     private val whipEngine: WhipEngine? = null
 ) : PlatformView {
-    private val surfaceView = SurfaceView(context)
+    private val webrtcRenderer = SurfaceViewRenderer(context)
+
     init {
-        engine.previewSurfaceView = surfaceView
-        surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) {
-                engine.setPreviewSurface(holder.surface)
-                whipEngine?.setPreviewSurface(holder.surface)
-                val res = engine.getCameraResolution()
-                if (res.isNotEmpty()) {
-                    val w = res["width"]?.toInt() ?: return
-                    val h = res["height"]?.toInt() ?: return
-                    holder.setFixedSize(w, h)
-                }
-            }
-            override fun surfaceChanged(holder: SurfaceHolder, fmt: Int, w: Int, h: Int) {}
-            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                engine.setPreviewSurface(null)
-                whipEngine?.setPreviewSurface(null)
-            }
-        })
+        whipEngine?.rootEglBase?.eglBaseContext?.let { eglContext ->
+            webrtcRenderer.init(eglContext, null)
+            webrtcRenderer.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+            webrtcRenderer.setEnableHardwareScaler(true)
+        }
+
+        whipEngine?.addPreviewSink(webrtcRenderer)
+        whipEngine?.ensureCameraPreview()
     }
-    override fun getView(): android.view.View = surfaceView
-    override fun dispose() {}
+
+    override fun getView(): View = webrtcRenderer
+
+    override fun dispose() {
+        whipEngine?.removePreviewSink(webrtcRenderer)
+        try {
+            webrtcRenderer.release()
+        } catch (e: Exception) {
+            android.util.Log.w("[CameraPreviewView]", "Error releasing WebRTC renderer: ${e.message}")
+        }
+    }
 }
 
 class CameraPreviewFactory(

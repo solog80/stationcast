@@ -25,8 +25,11 @@ class WhipEngine(private val context: Context) {
 
     var onEvent: ((String, String?) -> Unit)? = null
     var onStats: ((Map<String, Any?>) -> Unit)? = null
+    var onStreamingStateChanged: ((Boolean) -> Unit)? = null
 
-    private var rootEglBase: EglBase? = null
+    var rootEglBase: EglBase? = null
+        private set
+
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
 
@@ -34,23 +37,45 @@ class WhipEngine(private val context: Context) {
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
+    private val previewSinks = mutableListOf<VideoSink>()
 
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
 
     private var resourceUrl: String? = null
-    private var isStreaming = false
+    var isStreamingActive = false
+        private set
     private var statsJob: Job? = null
 
-    var activePreviewSurface: android.view.Surface? = null
+    fun addPreviewSink(sink: VideoSink) {
+        synchronized(previewSinks) {
+            if (!previewSinks.contains(sink)) {
+                previewSinks.add(sink)
+                videoTrack?.addSink(sink)
+            }
+        }
+    }
 
-    fun setPreviewSurface(surface: android.view.Surface?) {
-        activePreviewSurface = surface
+    fun removePreviewSink(sink: VideoSink) {
+        synchronized(previewSinks) {
+            previewSinks.remove(sink)
+            videoTrack?.removeSink(sink)
+        }
+    }
+
+    fun switchCamera() {
+        (videoCapturer as? CameraVideoCapturer)?.switchCamera(null)
+    }
+
+    fun setMuted(muted: Boolean) {
+        audioTrack?.setEnabled(!muted)
     }
 
     init {
         initWebRtcFactory()
     }
+
+    private var audioDeviceModule: org.webrtc.audio.AudioDeviceModule? = null
 
     private fun initWebRtcFactory() {
         try {
@@ -60,6 +85,14 @@ class WhipEngine(private val context: Context) {
                 .createInitializationOptions()
             PeerConnectionFactory.initialize(initOptions)
 
+            val adm = org.webrtc.audio.JavaAudioDeviceModule.builder(context)
+                .setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                .setUseHardwareAcousticEchoCanceler(org.webrtc.audio.JavaAudioDeviceModule.isBuiltInAcousticEchoCancelerSupported())
+                .setUseHardwareNoiseSuppressor(org.webrtc.audio.JavaAudioDeviceModule.isBuiltInNoiseSuppressorSupported())
+                .createAudioDeviceModule()
+
+            audioDeviceModule = adm
+
             val encoderFactory = DefaultVideoEncoderFactory(
                 rootEglBase?.eglBaseContext,
                 /* enableIntelVp8Encoder */ true,
@@ -68,14 +101,61 @@ class WhipEngine(private val context: Context) {
             val decoderFactory = DefaultVideoDecoderFactory(rootEglBase?.eglBaseContext)
 
             peerConnectionFactory = PeerConnectionFactory.builder()
+                .setAudioDeviceModule(adm)
                 .setVideoEncoderFactory(encoderFactory)
                 .setVideoDecoderFactory(decoderFactory)
                 .setOptions(PeerConnectionFactory.Options())
                 .createPeerConnectionFactory()
 
-            Log.d(tag, "WebRTC PeerConnectionFactory initialized successfully")
+            Log.d(tag, "WebRTC PeerConnectionFactory initialized successfully with persistent AudioDeviceModule")
         } catch (e: Exception) {
             Log.e(tag, "Failed to initialize WebRTC PeerConnectionFactory: ${e.message}", e)
+        }
+    }
+
+    private var previewWidth = 1280
+    private var previewHeight = 720
+    private var previewFps = 30
+
+    fun setPreviewConfig(width: Int, height: Int, fps: Int) {
+        previewWidth = width
+        previewHeight = height
+        previewFps = fps
+    }
+
+    /**
+     * Start camera capturer and video track for preview independently of network streaming,
+     * using passed or dynamically configured camera resolution.
+     */
+    fun ensureCameraPreview(width: Int? = null, height: Int? = null, fps: Int? = null) {
+        val w = width ?: previewWidth
+        val h = height ?: previewHeight
+        val f = fps ?: previewFps
+        scope.launch {
+            try {
+                if (videoTrack != null) return@launch
+                val factory = peerConnectionFactory ?: return@launch
+
+                videoCapturer = createCameraCapturer()
+                if (videoCapturer != null) {
+                    surfaceTextureHelper = SurfaceTextureHelper.create("WebRtcThread", rootEglBase?.eglBaseContext)
+                    videoSource = factory.createVideoSource(videoCapturer!!.isScreencast)
+                    videoCapturer!!.initialize(surfaceTextureHelper, context, videoSource!!.capturerObserver)
+                    videoCapturer!!.startCapture(w, h, f)
+
+                    videoTrack = factory.createVideoTrack("video_track_0", videoSource)
+                    synchronized(previewSinks) {
+                        for (sink in previewSinks) {
+                            videoTrack?.addSink(sink)
+                        }
+                    }
+                    Log.d(tag, "WebRTC Camera preview started at ${w}x${h}@${f}fps")
+                } else {
+                    Log.w(tag, "No camera capturer available")
+                }
+            } catch (e: Exception) {
+                Log.e(tag, "Failed to start camera preview: ${e.message}", e)
+            }
         }
     }
 
@@ -91,14 +171,25 @@ class WhipEngine(private val context: Context) {
     ) {
         scope.launch {
             try {
-                if (isStreaming) {
-                    stopWhipStream()
+                if (isStreamingActive && peerConnection != null) {
+                    stopWhipStream(keepPreview = true)
                 }
 
+                setPreviewConfig(width, height, fps)
                 emitEvent("connecting", "Initializing WHIP session")
                 val factory = peerConnectionFactory ?: throw IllegalStateException("PeerConnectionFactory not initialized")
 
-                // 1. Audio Track Setup
+                // 1. Ensure camera video track is running
+                if (videoTrack == null) {
+                    ensureCameraPreview(width, height, fps)
+                    var count = 0
+                    while (videoTrack == null && count < 20) {
+                        delay(50)
+                        count++
+                    }
+                }
+
+                // 2. Audio Track Setup
                 val audioConstraints = MediaConstraints().apply {
                     mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
                     mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
@@ -107,19 +198,6 @@ class WhipEngine(private val context: Context) {
                 }
                 audioSource = factory.createAudioSource(audioConstraints)
                 audioTrack = factory.createAudioTrack("audio_track_0", audioSource)
-
-                // 2. Video Track Setup
-                videoCapturer = createCameraCapturer()
-                if (videoCapturer != null) {
-                    surfaceTextureHelper = SurfaceTextureHelper.create("WebRtcThread", rootEglBase?.eglBaseContext)
-                    videoSource = factory.createVideoSource(videoCapturer!!.isScreencast)
-                    videoCapturer!!.initialize(surfaceTextureHelper, context, videoSource!!.capturerObserver)
-                    videoCapturer!!.startCapture(width, height, fps)
-
-                    videoTrack = factory.createVideoTrack("video_track_0", videoSource)
-                } else {
-                    Log.w(tag, "No camera capturer available, streaming audio only")
-                }
 
                 // 3. Create PeerConnection
                 val iceServers = listOf(
@@ -135,7 +213,7 @@ class WhipEngine(private val context: Context) {
                     override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
                         Log.d(tag, "ICE Connection State: $state")
                         if (state == PeerConnection.IceConnectionState.CONNECTED) {
-                            isStreaming = true
+                            isStreamingActive = true
                             emitEvent("live", "WebRTC Connected")
                             startStatsLoop()
                         } else if (state == PeerConnection.IceConnectionState.DISCONNECTED ||
@@ -286,12 +364,16 @@ class WhipEngine(private val context: Context) {
     }
 
     /**
-     * Stop WHIP stream, send HTTP DELETE to teardown session on server, and release resources.
+     * Stop WHIP network stream, send HTTP DELETE teardown to server.
+     * Keeps camera preview active if [keepPreview] is true.
      */
-    fun stopWhipStream() {
+    fun stopWhipStream(keepPreview: Boolean = true) {
         scope.launch {
             try {
-                isStreaming = false
+                isStreamingActive = false
+                scope.launch(Dispatchers.Main) {
+                    onStreamingStateChanged?.invoke(false)
+                }
                 statsJob?.cancel()
                 statsJob = null
 
@@ -313,22 +395,9 @@ class WhipEngine(private val context: Context) {
                 }
                 resourceUrl = null
 
-                // Close PeerConnection & Video Capturer
+                // Close PeerConnection & Audio
                 peerConnection?.close()
                 peerConnection = null
-
-                videoCapturer?.stopCapture()
-                videoCapturer?.dispose()
-                videoCapturer = null
-
-                surfaceTextureHelper?.dispose()
-                surfaceTextureHelper = null
-
-                videoTrack?.dispose()
-                videoTrack = null
-
-                videoSource?.dispose()
-                videoSource = null
 
                 audioTrack?.dispose()
                 audioTrack = null
@@ -336,12 +405,38 @@ class WhipEngine(private val context: Context) {
                 audioSource?.dispose()
                 audioSource = null
 
-                Log.d(tag, "WHIP Stream stopped and resources released")
+                if (!keepPreview) {
+                    videoCapturer?.stopCapture()
+                    videoCapturer?.dispose()
+                    videoCapturer = null
+
+                    surfaceTextureHelper?.dispose()
+                    surfaceTextureHelper = null
+
+                    videoTrack?.let { track ->
+                        synchronized(previewSinks) {
+                            for (sink in previewSinks) {
+                                track.removeSink(sink)
+                            }
+                        }
+                        track.dispose()
+                    }
+                    videoTrack = null
+
+                    videoSource?.dispose()
+                    videoSource = null
+                }
+
+                Log.d(tag, "WHIP Stream stopped (keepPreview=$keepPreview)")
                 emitEvent("stopped", null)
             } catch (t: Throwable) {
                 Log.e(tag, "Error stopping WHIP stream: ${t.message}", t)
             }
         }
+    }
+
+    fun stopCameraPreview() {
+        stopWhipStream(keepPreview = false)
     }
 
     private fun createCameraCapturer(): VideoCapturer? {
@@ -365,21 +460,33 @@ class WhipEngine(private val context: Context) {
     private fun startStatsLoop() {
         statsJob?.cancel()
         statsJob = scope.launch {
-            while (isStreaming) {
+            while (isStreamingActive) {
                 peerConnection?.getStats { report ->
                     var bps = 0L
                     var rtt = 0
                     var pktsSent = 0L
                     var pktsLost = 0L
+                    var currentAudioLevel = 0.0
 
                     for (stats in report.statsMap.values) {
                         if (stats.type == "outbound-rtp") {
                             val bytes = (stats.members["bytesSent"] as? Number)?.toLong() ?: 0L
                             pktsSent += (stats.members["packetsSent"] as? Number)?.toLong() ?: 0L
                             pktsLost += (stats.members["packetsLost"] as? Number)?.toLong() ?: 0L
+                            if (stats.members["kind"] == "audio" || stats.members["mediaType"] == "audio") {
+                                currentAudioLevel = (stats.members["audioLevel"] as? Number)?.toDouble() ?: currentAudioLevel
+                            }
+                        } else if (stats.type == "media-source" && (stats.members["kind"] == "audio" || stats.members["mediaType"] == "audio")) {
+                            currentAudioLevel = (stats.members["audioLevel"] as? Number)?.toDouble() ?: currentAudioLevel
                         } else if (stats.type == "remote-inbound-rtp") {
                             rtt = ((stats.members["roundTripTime"] as? Number)?.toDouble()?.times(1000))?.toInt() ?: 0
                         }
+                    }
+
+                    val db = if (currentAudioLevel > 0.00001) {
+                        (20 * kotlin.math.log10(currentAudioLevel)).coerceIn(-60.0, 0.0)
+                    } else {
+                        -60.0
                     }
 
                     scope.launch(Dispatchers.Main) {
@@ -388,11 +495,12 @@ class WhipEngine(private val context: Context) {
                             "rttMs" to rtt,
                             "packetsSent" to pktsSent,
                             "packetsDropped" to pktsLost,
+                            "audioLevelDb" to listOf(db, db),
                             "protocol" to "webrtc"
                         ))
                     }
                 }
-                delay(1000)
+                delay(200)
             }
         }
     }

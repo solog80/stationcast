@@ -190,7 +190,13 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "initialize" -> launchCatching(result) {
-                engine.initialize(call.arguments as Map<*, *>)
+                val args = call.arguments as Map<*, *>
+                val width = (args["width"] as Number? ?: 1280).toInt()
+                val height = (args["height"] as Number? ?: 720).toInt()
+                val fps = (args["fps"] as Number? ?: 30).toInt()
+                whipEngine.setPreviewConfig(width, height, fps)
+                whipEngine.ensureCameraPreview(width, height, fps)
+                engine.initialize(args)
                 result.success(null)
             }
             "startStream" -> launchCatching(result) {
@@ -204,16 +210,18 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     val bps = (args["videoBitrateBps"] as Number? ?: 3_000_000).toInt()
                     whipEngine.startWhipStream(webrtcUrl, width, height, fps, bps)
                 } else {
+                    whipEngine.stopCameraPreview()
                     engine.startStream(args)
                 }
                 result.success(null)
             }
             "stopStream" -> launchCatching(result) {
-                whipEngine.stopWhipStream()
+                whipEngine.stopWhipStream(keepPreview = true)
                 engine.stopStream()
                 result.success(null)
             }
             "switchCamera" -> launchCatching(result) {
+                whipEngine.switchCamera()
                 engine.switchCamera()
                 result.success(null)
             }
@@ -226,7 +234,9 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(null)
             }
             "setMuted" -> {
-                engine.setMuted(call.argument<Boolean>("muted") ?: false)
+                val muted = call.argument<Boolean>("muted") ?: false
+                engine.setMuted(muted)
+                whipEngine.setMuted(muted)
                 result.success(null)
             }
             "setVideoBitrate" -> {

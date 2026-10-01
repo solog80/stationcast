@@ -103,68 +103,128 @@ class OmeNdiBridgeEngine:
             return
 
         add_log(f"NDI Stream published as '{self.ndi_name}'")
-        self.pc = RTCPeerConnection()
 
-        @self.pc.on("track")
-        def on_track(track):
-            add_log(f"Receiving WebRTC Track: {track.kind}")
-            if track.kind == "video":
-                asyncio.create_task(self._handle_video(track))
-            elif track.kind == "audio":
-                asyncio.create_task(self._handle_audio(track))
+        while self.running:
+            self.pc = RTCPeerConnection()
 
-        self.pc.addTransceiver("video", direction="recvonly")
-        self.pc.addTransceiver("audio", direction="recvonly")
+            @self.pc.on("track")
+            def on_track(track):
+                add_log(f"Receiving WebRTC Track: {track.kind}")
+                if track.kind == "video":
+                    asyncio.create_task(self._handle_video(track))
+                elif track.kind == "audio":
+                    asyncio.create_task(self._handle_audio(track))
 
-        try:
-            state["status"] = "Connecting to OME..."
+            host = state.get("host", "75.119.149.43")
+            stream = state.get("stream", "field1")
+
+            connected = False
+            state["status"] = "Connecting..."
             state["status_color"] = "yellow"
-            offer = await self.pc.createOffer()
-            await self.pc.setLocalDescription(offer)
 
-            add_log(f"Sending WHEP Offer to: {self.whep_url}")
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.whep_url,
-                    data=self.pc.localDescription.sdp,
-                    headers={"Content-Type": "application/sdp"},
-                    timeout=10
-                ) as resp:
-                    if resp.status not in (200, 201):
-                        err_text = await resp.text()
-                        add_log(f"ERROR: Server HTTP {resp.status}: {err_text}")
-                        state["status"] = f"HTTP {resp.status} Error"
-                        state["status_color"] = "red"
-                        return
+            # Method 1: Try OvenMediaEngine Native WebSocket Signalling (OvenPlayer Protocol)
+            ws_url = f"ws://{host}:3333/app/{stream}"
+            add_log(f"Connecting to OME WebSocket: {ws_url}")
+            
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.ws_connect(ws_url, timeout=5) as ws:
+                        await ws.send_json({"command": "request_offer"})
 
-                    answer_sdp = await resp.text()
-                    answer = RTCSessionDescription(sdp=answer_sdp, type="answer")
-                    await self.pc.setRemoteDescription(answer)
-                    add_log("CONNECTED! WebRTC Handshake Successful.")
-                    state["status"] = "Streaming Live NDI"
-                    state["status_color"] = "green"
+                        async for msg in ws:
+                            if not self.running:
+                                break
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                data = json.loads(msg.data)
+                                error_code = data.get("code")
+                                cmd = data.get("command")
 
-            while self.running:
-                await asyncio.sleep(0.5)
+                                if error_code == 404 or "Cannot create offer" in str(data):
+                                    add_log(f"⚠️ Live stream '{stream}' is not active on OME server yet.")
+                                    break
 
-        except Exception as e:
-            add_log(f"ERROR: Connection error: {e}")
-            state["status"] = "Connection Error"
-            state["status_color"] = "red"
-        finally:
-            await self._cleanup()
+                                if cmd == "offer":
+                                    sdp_data = data.get("sdp")
+                                    offer_sdp = sdp_data.get("sdp") if isinstance(sdp_data, dict) else str(sdp_data)
+                                    candidates = data.get("candidates", [])
+
+                                    cand_lines = [c["candidate"] if c["candidate"].startswith("a=") else "a=" + c["candidate"] for c in candidates if c.get("candidate")]
+                                    full_sdp = offer_sdp.strip() + "\r\n" + "\r\n".join(cand_lines) + "\r\n"
+
+                                    offer = RTCSessionDescription(sdp=full_sdp, type="offer")
+                                    await self.pc.setRemoteDescription(offer)
+
+                                    answer = await self.pc.createAnswer()
+                                    await self.pc.setLocalDescription(answer)
+
+                                    reply = {
+                                        "command": "answer",
+                                        "id": data.get("id"),
+                                        "peer_id": data.get("peer_id"),
+                                        "sdp": {
+                                            "type": "answer",
+                                            "sdp": self.pc.localDescription.sdp
+                                        }
+                                    }
+                                    if reply["id"] is None: del reply["id"]
+                                    if reply["peer_id"] is None: del reply["peer_id"]
+
+                                    await ws.send_json(reply)
+                                    add_log("CONNECTED via OME WebSocket! Streaming live WebRTC media -> NDI output...")
+                                    state["status"] = "Streaming Live NDI"
+                                    state["status_color"] = "green"
+                                    connected = True
+
+                                    async for post_msg in ws:
+                                        if not self.running:
+                                            break
+                                        if post_msg.type == aiohttp.WSMsgType.TEXT:
+                                            pdata = json.loads(post_msg.data)
+                                            if pdata.get("code") == 400 or pdata.get("command") == "error":
+                                                add_log(f"OME Session ended: {pdata}")
+                                                connected = False
+                                                break
+                                    break
+                                elif cmd == "error":
+                                    add_log(f"OME WebSocket Error: {data.get('message')}")
+                                    break
+            except Exception as ws_err:
+                add_log(f"WebSocket attempt failed: {ws_err}")
+
+            if connected:
+                while self.running and connected:
+                    await asyncio.sleep(1)
+            else:
+                if self.running:
+                    add_log("Waiting for field reporter to go live... Retrying in 3 seconds.")
+                    state["status"] = "Waiting for Stream..."
+                    state["status_color"] = "yellow"
+                    await self._cleanup_pc()
+                    await asyncio.sleep(3)
+
+        await self._cleanup()
+
+    async def _cleanup_pc(self):
+        if self.pc:
+            try:
+                await self.pc.close()
+            except Exception:
+                pass
+            self.pc = None
 
     async def _handle_video(self, track):
         video_frame = ndi.VideoFrameV2()
         while self.running:
             try:
                 frame = await track.recv()
-                img = frame.to_ndarray(format="bgr0")
-                video_frame.xres = img.shape[1]
-                video_frame.yres = img.shape[0]
+                img_bgr = frame.to_ndarray(format="bgr24")
+                h, w, c = img_bgr.shape
+                img_bgrx = np.dstack([img_bgr, np.full((h, w), 255, dtype=np.uint8)])
+                video_frame.xres = w
+                video_frame.yres = h
                 video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
-                video_frame.data = img
-                video_frame.line_stride_in_bytes = img.strides[0]
+                video_frame.data = img_bgrx
+                video_frame.line_stride_in_bytes = img_bgrx.strides[0]
                 ndi.send_send_video_v2(self.ndi_send, video_frame)
             except Exception:
                 break
@@ -186,10 +246,10 @@ class OmeNdiBridgeEngine:
                 break
 
     async def _cleanup(self):
-        if self.pc:
-            await self.pc.close()
+        await self._cleanup_pc()
         if self.ndi_send:
             ndi.send_destroy(self.ndi_send)
+            self.ndi_send = None
         ndi.destroy()
         state["status"] = "Disconnected"
         state["status_color"] = "red"

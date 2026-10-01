@@ -29,7 +29,7 @@ def build():
         "--hidden-import", "aiohttp",
         "--hidden-import", "av",
         "--hidden-import", "numpy",
-        "gui_bridge.py"
+        "web_bridge.py"
     ]
 
     print("Running command:", " ".join(cmd))

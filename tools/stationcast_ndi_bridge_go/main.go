@@ -869,9 +869,13 @@ func main() {
 		openBrowser(serverURL)
 	}()
 
-	if err := http.Serve(listener, nil); err != nil {
-		log.Fatalf("HTTP server error: %v", err)
-	}
+	go func() {
+		if err := http.Serve(listener, nil); err != nil {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	setupSystray(activeEngine, actualPort)
 }
 
 func openBrowser(url string) {

@@ -31,7 +31,7 @@ state = {
     "status_color": "red",
     "host": "75.119.149.43",
     "stream": "field1",
-    "ndi_name": "Field 1 (StationCast)",
+    "ndi_name": "Field 1 - StationCast",
     "logs": []
 }
 
@@ -93,8 +93,9 @@ class OmeNdiBridgeEngine:
             state["status_color"] = "red"
             return
 
+        clean_name = self.ndi_name.replace("(", "").replace(")", "").replace(" ", "_")
         send_settings = ndi.SendCreate()
-        send_settings.ndi_name = self.ndi_name
+        send_settings.ndi_name = clean_name or "Field_1_StationCast"
         self.ndi_send = ndi.send_create(send_settings)
         if self.ndi_send is None:
             add_log("ERROR: Failed to create NDI send instance.")
@@ -157,13 +158,25 @@ class OmeNdiBridgeEngine:
                                     answer = await self.pc.createAnswer()
                                     await self.pc.setLocalDescription(answer)
 
+                                    # Inject PLI/FIR RTCP feedback to force OME keyframe generation
+                                    answer_sdp = self.pc.localDescription.sdp
+                                    lines = answer_sdp.splitlines()
+                                    new_lines = []
+                                    for line in lines:
+                                        new_lines.append(line)
+                                        if line.startswith("a=rtpmap:"):
+                                            pt = line.split()[0].split(":")[1]
+                                            new_lines.append(f"a=rtcp-fb:{pt} nack pli")
+                                            new_lines.append(f"a=rtcp-fb:{pt} ccm fir")
+                                    final_sdp = "\r\n".join(new_lines) + "\r\n"
+
                                     reply = {
                                         "command": "answer",
                                         "id": data.get("id"),
                                         "peer_id": data.get("peer_id"),
                                         "sdp": {
                                             "type": "answer",
-                                            "sdp": self.pc.localDescription.sdp
+                                            "sdp": final_sdp
                                         }
                                     }
                                     if reply["id"] is None: del reply["id"]
@@ -214,17 +227,17 @@ class OmeNdiBridgeEngine:
 
     async def _handle_video(self, track):
         video_frame = ndi.VideoFrameV2()
+        video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_RGBA
         while self.running:
             try:
                 frame = await track.recv()
-                img_bgr = frame.to_ndarray(format="bgr24")
-                h, w, c = img_bgr.shape
-                img_bgrx = np.dstack([img_bgr, np.full((h, w), 255, dtype=np.uint8)])
+                img_rgba = frame.to_ndarray(format="rgba")
+                h, w, _ = img_rgba.shape
+
                 video_frame.xres = w
                 video_frame.yres = h
-                video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
-                video_frame.data = img_bgrx
-                video_frame.line_stride_in_bytes = img_bgrx.strides[0]
+                video_frame.data = img_rgba
+                video_frame.line_stride_in_bytes = img_rgba.strides[0]
                 ndi.send_send_video_v2(self.ndi_send, video_frame)
             except Exception:
                 break
@@ -393,11 +406,33 @@ class BridgeHTTPHandler(BaseHTTPRequestHandler):
         pass
 
 def main():
-    server = HTTPServer(('127.0.0.1', PORT), BridgeHTTPHandler)
-    logger.info(f"StationCast NDI Bridge Server running at http://localhost:{PORT}")
+    global PORT, active_engine
+    server = None
+    for p in range(7890, 7900):
+        try:
+            HTTPServer.allow_reuse_address = True
+            server = HTTPServer(('127.0.0.1', p), BridgeHTTPHandler)
+            PORT = p
+            break
+        except OSError:
+            continue
+
+    if not server:
+        logger.error("Could not bind HTTP server port.")
+        sys.exit(1)
+
+    url = f"http://localhost:{PORT}"
+    logger.info(f"StationCast NDI Bridge Server running at {url}")
     
-    webbrowser.open(f"http://localhost:{PORT}")
-    
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+    # Auto-start NDI engine on launch
+    active_engine = OmeNdiBridgeEngine(f"http://{state['host']}:3333/app/{state['stream']}?direction=whep", state["ndi_name"])
+    active_engine.start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:

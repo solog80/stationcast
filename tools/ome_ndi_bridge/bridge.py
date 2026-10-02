@@ -29,7 +29,10 @@ class OmeNdiBridge:
             logger.error("Failed to initialize NDI SDK")
             sys.exit(1)
         send_settings = ndi.SendCreate()
-        send_settings.ndi_name = self.ndi_name
+        send_settings.ndi_name = str(self.ndi_name)
+        send_settings.clock_video = True
+        send_settings.clock_audio = True
+        logger.info(f"Creating NDI send instance with name: {repr(self.ndi_name)}")
         self.ndi_send = ndi.send_create(send_settings)
         if self.ndi_send is None:
             logger.error("Failed to create NDI send instance")

@@ -362,8 +362,17 @@ class BroadcastEngine(private val context: Context) {
             recordingFilePath = null
         }
 
+        stopAudioProbe()
         android.util.Log.d("[BroadcastEngine]", "Stream stopped")
         emit("stopped", null)
+    }
+
+    fun stopAudioProbe() {
+        try {
+            audioProbe?.stop()
+            audioProbe?.release()
+            audioProbe = null
+        } catch (_: Exception) {}
     }
 
     @RequiresPermission(Manifest.permission.CAMERA)

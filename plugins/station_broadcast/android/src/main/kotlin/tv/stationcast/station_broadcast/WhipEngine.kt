@@ -87,8 +87,19 @@ class WhipEngine(private val context: Context) {
 
             val adm = org.webrtc.audio.JavaAudioDeviceModule.builder(context)
                 .setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
-                .setUseHardwareAcousticEchoCanceler(org.webrtc.audio.JavaAudioDeviceModule.isBuiltInAcousticEchoCancelerSupported())
-                .setUseHardwareNoiseSuppressor(org.webrtc.audio.JavaAudioDeviceModule.isBuiltInNoiseSuppressorSupported())
+                .setUseHardwareAcousticEchoCanceler(false)
+                .setUseHardwareNoiseSuppressor(false)
+                .setAudioRecordErrorCallback(object : org.webrtc.audio.JavaAudioDeviceModule.AudioRecordErrorCallback {
+                    override fun onWebRtcAudioRecordInitError(errorMessage: String?) {
+                        Log.e(tag, "AudioRecord init error: $errorMessage")
+                    }
+                    override fun onWebRtcAudioRecordStartError(errorCode: org.webrtc.audio.JavaAudioDeviceModule.AudioRecordStartErrorCode?, errorMessage: String?) {
+                        Log.e(tag, "AudioRecord start error: $errorMessage ($errorCode)")
+                    }
+                    override fun onWebRtcAudioRecordError(errorMessage: String?) {
+                        Log.e(tag, "AudioRecord error: $errorMessage")
+                    }
+                })
                 .createAudioDeviceModule()
 
             audioDeviceModule = adm
@@ -198,6 +209,7 @@ class WhipEngine(private val context: Context) {
                 }
                 audioSource = factory.createAudioSource(audioConstraints)
                 audioTrack = factory.createAudioTrack("audio_track_0", audioSource)
+                audioTrack?.setEnabled(true)
 
                 // 3. Create PeerConnection
                 val iceServers = listOf(

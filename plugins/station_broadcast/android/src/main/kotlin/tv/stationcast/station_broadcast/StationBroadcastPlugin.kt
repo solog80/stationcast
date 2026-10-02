@@ -203,6 +203,7 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 val args = call.arguments as Map<*, *>
                 val protocol = args["protocol"] as String?
                 if (protocol == "webrtc") {
+                    engine.stopAudioProbe()
                     val webrtcUrl = args["webrtcUrl"] as String? ?: ""
                     val width = (args["width"] as Number? ?: 1280).toInt()
                     val height = (args["height"] as Number? ?: 720).toInt()

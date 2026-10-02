@@ -50,3 +50,11 @@ lib/secrets.dart
 .env
 .env.*
 !.env.example
+
+# Tools build outputs
+tools/ome_ndi_bridge/build/
+tools/ome_ndi_bridge/dist/
+tools/ome_ndi_bridge/venv/
+tools/ome_ndi_bridge/ndi_bridge_config.json
+tools/stationcast_ndi_bridge_go/
+

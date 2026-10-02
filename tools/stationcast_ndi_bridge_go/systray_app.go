@@ -59,7 +59,7 @@ func setupSystray(engine *BridgeEngine, port int) {
 	systray.Run(func() {
 		iconData := generateTrayIconPNG()
 		systray.SetTemplateIcon(iconData, iconData)
-		systray.SetTitle("StationCast NDI")
+		systray.SetTitle("")
 		systray.SetTooltip("StationCast OME to NDI Bridge")
 
 		mStatus = systray.AddMenuItem("Status: Initializing...", "Current Stream Status")

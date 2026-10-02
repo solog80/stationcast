@@ -58,6 +58,7 @@ tools/ome_ndi_bridge/venv/
 tools/ome_ndi_bridge/ndi_bridge_config.json
 tools/stationcast_ndi_bridge_go/StationCast_NDI_Bridge
 tools/stationcast_ndi_bridge_go/StationCast_NDI_Bridge.exe
+tools/stationcast_ndi_bridge_go/*.app
 tools/stationcast_ndi_bridge_go/*.log
 
 

@@ -1,10 +1,12 @@
-//go:build darwin && cgo
+//go:build cgo
 
 package main
 
 /*
-#cgo CFLAGS: -I/opt/homebrew/include -I/usr/local/include
-#cgo LDFLAGS: -L/opt/homebrew/lib -L/usr/local/lib -lavcodec -lavutil -lswscale -framework VideoToolbox -framework CoreVideo -framework CoreMedia -framework CoreFoundation
+#cgo darwin CFLAGS: -I/opt/homebrew/include -I/usr/local/include
+#cgo darwin LDFLAGS: -L/opt/homebrew/lib -L/usr/local/lib -lavcodec -lavutil -lswscale -framework VideoToolbox -framework CoreVideo -framework CoreMedia -framework CoreFoundation
+#cgo windows LDFLAGS: -lavcodec -lavutil -lswscale
+#cgo linux LDFLAGS: -lavcodec -lavutil -lswscale
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -41,10 +43,22 @@ static HWDecoderWrapper* create_hw_decoder() {
     }
 
     AVBufferRef* hw_device_ctx = NULL;
+
+#if defined(__APPLE__)
+    // macOS VideoToolbox Hardware Acceleration
     if (av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_VIDEOTOOLBOX, NULL, NULL, 0) == 0) {
         dec->codec_ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
         av_buffer_unref(&hw_device_ctx);
     }
+#elif defined(_WIN32)
+    // Windows Direct3D11 / DXVA2 / CUDA / QSV Hardware Acceleration
+    if (av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_D3D11VA, NULL, NULL, 0) == 0 ||
+        av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_DXVA2, NULL, NULL, 0) == 0 ||
+        av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, 0) == 0) {
+        dec->codec_ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
+        av_buffer_unref(&hw_device_ctx);
+    }
+#endif
 
     if (avcodec_open2(dec->codec_ctx, codec, NULL) < 0) {
         avcodec_free_context(&dec->codec_ctx);
@@ -92,7 +106,10 @@ static bool decode_hw_frame(HWDecoderWrapper* dec, const uint8_t* data, int data
     }
 
     AVFrame* src_frame = dec->hw_frame;
-    if (dec->hw_frame->format == AV_PIX_FMT_VIDEOTOOLBOX) {
+    if (dec->hw_frame->format == AV_PIX_FMT_VIDEOTOOLBOX ||
+        dec->hw_frame->format == AV_PIX_FMT_D3D11 ||
+        dec->hw_frame->format == AV_PIX_FMT_DXVA2_VLD ||
+        dec->hw_frame->format == AV_PIX_FMT_CUDA) {
         if (av_hwframe_transfer_data(dec->frame, dec->hw_frame, 0) < 0) {
             return false;
         }
@@ -148,7 +165,7 @@ type CgoVideoDecoder struct {
 func NewVideoDecoder() (VideoDecoder, error) {
 	dec := C.create_hw_decoder()
 	if dec == nil {
-		return nil, errors.New("failed to initialize Cgo VideoToolbox decoder")
+		return nil, errors.New("failed to initialize Cgo GPU hardware decoder")
 	}
 	return &CgoVideoDecoder{dec: dec}, nil
 }

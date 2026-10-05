@@ -662,15 +662,49 @@ class BroadcastEngine(private val context: Context) {
         } catch (_: Exception) {}
     }
 
+    private fun getBatteryTemperature(): Float {
+        return try {
+            val intent = context.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val temp = intent?.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
+            temp / 10.0f
+        } catch (_: Exception) { 0f }
+    }
+
+    private fun getCurrentThermalStatus(): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            when (pm?.currentThermalStatus) {
+                android.os.PowerManager.THERMAL_STATUS_NONE -> "NONE"
+                android.os.PowerManager.THERMAL_STATUS_LIGHT -> "LIGHT"
+                android.os.PowerManager.THERMAL_STATUS_MODERATE -> "MODERATE"
+                android.os.PowerManager.THERMAL_STATUS_SEVERE -> "SEVERE"
+                android.os.PowerManager.THERMAL_STATUS_CRITICAL -> "CRITICAL"
+                android.os.PowerManager.THERMAL_STATUS_EMERGENCY -> "EMERGENCY"
+                android.os.PowerManager.THERMAL_STATUS_SHUTDOWN -> "SHUTDOWN"
+                else -> "UNKNOWN"
+            }
+        } else {
+            "UNSUPPORTED"
+        }
+    }
+
     private fun startStatsPolling(current: DualStreamer) {
         initAudioProbe()
         statsJob?.cancel()
         statsJob = scope.launch {
             while (isActive) {
+                val batteryTemp = getBatteryTemperature()
+                val thermalStatus = getCurrentThermalStatus()
                 // Stats from first endpoint (streaming)
                 val stats = runCatching {
                     (current.first as? io.github.thibaultbee.streampack.core.pipelines.outputs.encoding.IEncodingPipelineOutput)?.endpoint?.metrics as? Stats
                 }.getOrNull()
+
+                val bitrateMbps = if (stats != null) String.format(Locale.US, "%.2f", stats.mbpsSendRate) else "0.00"
+                val rtt = stats?.msRTT ?: 0
+                val dropped = stats?.pktSndDropTotal ?: 0
+                android.util.Log.d("[ThermalDiag]", "Battery: ${batteryTemp}°C | ThermalStatus: $thermalStatus | Bitrate: ${bitrateMbps} Mbps | RTT: ${rtt}ms | Dropped: $dropped")
+
                 if (stats != null) {
                     lastStats = stats
                     onStats?.invoke(mapOf(
@@ -680,6 +714,8 @@ class BroadcastEngine(private val context: Context) {
                         "packetsDropped" to stats.pktSndDropTotal,
                         "packetsRetransmitted" to stats.pktRetransTotal,
                         "bandwidthMbps" to stats.mbpsBandwidth,
+                        "batteryTemp" to batteryTemp,
+                        "thermalStatus" to thermalStatus,
                     ))
                 }
                 delay(1000)

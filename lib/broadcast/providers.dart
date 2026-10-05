@@ -62,22 +62,7 @@ class PresetsNotifier extends AsyncNotifier<List<DestinationPreset>> {
           if (remoteDests != null && remoteDests.isNotEmpty) {
             final remotes = remoteDests
                 .map(
-                  (d) => DestinationPreset(
-                    id:
-                        d['id'] as String? ??
-                        DateTime.now().microsecondsSinceEpoch.toString(),
-                    name: d['name'] as String? ?? '',
-                    protocol: (d['protocol'] as String?) == 'rtmp'
-                        ? BroadcastProtocol.rtmp
-                        : BroadcastProtocol.srt,
-                    host: d['host'] as String? ?? '',
-                    port: (d['port'] as num?)?.toInt() ?? 8890,
-                    streamId: d['streamId'] as String? ?? '',
-                    passphrase: d['passphrase'] as String? ?? '',
-                    latencyMs: (d['latencyMs'] as num?)?.toInt() ?? 200,
-                    rtmpUrl: d['rtmpUrl'] as String? ?? '',
-                    streamKey: d['streamKey'] as String? ?? '',
-                  ),
+                  (d) => DestinationPreset.fromJson(d.cast<String, Object?>()),
                 )
                 .toList();
             // Save remote destinations locally so they persist across restarts
@@ -92,7 +77,10 @@ class PresetsNotifier extends AsyncNotifier<List<DestinationPreset>> {
   }
 
   Future<void> upsert(DestinationPreset preset) async {
-    final current = [...state.value ?? <DestinationPreset>[]];
+    var current = [...state.value ?? <DestinationPreset>[]];
+    if (preset.isDefault) {
+      current = current.map((p) => p.copyWith(isDefault: false)).toList();
+    }
     final index = current.indexWhere((p) => p.id == preset.id);
     if (index >= 0) {
       current[index] = preset;
@@ -101,6 +89,22 @@ class PresetsNotifier extends AsyncNotifier<List<DestinationPreset>> {
     }
     state = AsyncData(current);
     await ref.read(settingsRepositoryProvider).savePresets(current);
+    if (ref.read(authServiceProvider).isSignedIn) {
+      final config = ref.read(returnFeedConfigProvider).valueOrNull ?? const ReturnFeedConfig();
+      await saveConfigToFirestore(config, destinations: current);
+    }
+  }
+
+  Future<void> setDefault(String id) async {
+    final current = (state.value ?? []).map((p) {
+      return p.copyWith(isDefault: p.id == id);
+    }).toList();
+    state = AsyncData(current);
+    await ref.read(settingsRepositoryProvider).savePresets(current);
+    if (ref.read(authServiceProvider).isSignedIn) {
+      final config = ref.read(returnFeedConfigProvider).valueOrNull ?? const ReturnFeedConfig();
+      await saveConfigToFirestore(config, destinations: current);
+    }
   }
 
   Future<void> remove(String id) async {
@@ -108,6 +112,10 @@ class PresetsNotifier extends AsyncNotifier<List<DestinationPreset>> {
       ..removeWhere((p) => p.id == id);
     state = AsyncData(current);
     await ref.read(settingsRepositoryProvider).savePresets(current);
+    if (ref.read(authServiceProvider).isSignedIn) {
+      final config = ref.read(returnFeedConfigProvider).valueOrNull ?? const ReturnFeedConfig();
+      await saveConfigToFirestore(config, destinations: current);
+    }
   }
 }
 

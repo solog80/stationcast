@@ -1,6 +1,7 @@
 package tv.stationcast.station_broadcast
 
 import android.content.Context
+import android.os.Build
 import android.view.SurfaceHolder
 import android.view.View
 import android.widget.FrameLayout
@@ -20,6 +21,9 @@ class CameraPreviewPlatformView(
     private val streampackSurfaceView = android.view.SurfaceView(context)
 
     init {
+        // Lock display panel composition to 24.0 Hz (matching Blackmagic Camera display lock)
+        applySurfaceFrameRateLock()
+
         // Setup WebRTC renderer for idle preview & WHIP mode
         whipEngine?.rootEglBase?.eglBaseContext?.let { eglContext ->
             webrtcRenderer.init(eglContext, null)
@@ -32,10 +36,12 @@ class CameraPreviewPlatformView(
         // Setup clean SurfaceView for StreamPack SRT/RTMP mode
         streampackSurfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
+                applySurfaceFrameRate(holder.surface)
                 engine.setPreviewSurface(holder.surface)
             }
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                applySurfaceFrameRate(holder.surface)
                 engine.setPreviewSurface(holder.surface)
             }
 
@@ -47,6 +53,7 @@ class CameraPreviewPlatformView(
 
         val currentSurface = streampackSurfaceView.holder.surface
         if (currentSurface != null && currentSurface.isValid) {
+            applySurfaceFrameRate(currentSurface)
             engine.setPreviewSurface(currentSurface)
         }
 
@@ -80,6 +87,26 @@ class CameraPreviewPlatformView(
                 }
             }
         }
+    }
+
+    private fun applySurfaceFrameRate(surface: android.view.Surface?) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && surface != null && surface.isValid) {
+            try {
+                // Lock display refresh rate hint to 24.0 Hz (Blackmagic Camera style display thermal optimization)
+                surface.setFrameRate(
+                    24.0f,
+                    android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE
+                )
+                android.util.Log.d("[CameraPreviewView]", "Surface refresh rate locked to 24.0 Hz")
+            } catch (e: Exception) {
+                android.util.Log.w("[CameraPreviewView]", "Failed to set surface frame rate: ${e.message}")
+            }
+        }
+    }
+
+    private fun applySurfaceFrameRateLock() {
+        streampackSurfaceView.holder.surface?.let { applySurfaceFrameRate(it) }
+        webrtcRenderer.holder.surface?.let { applySurfaceFrameRate(it) }
     }
 
     override fun getView(): View = container

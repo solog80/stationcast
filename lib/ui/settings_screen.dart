@@ -44,7 +44,40 @@ class SettingsScreen extends ConsumerWidget {
             Card(
               color: ControlRoomColors.surface,
               child: ListTile(
-                title: Text(preset.name),
+                leading: IconButton(
+                  icon: Icon(
+                    preset.isDefault ? Icons.star : Icons.star_border,
+                    color: preset.isDefault ? Colors.amber : Colors.white38,
+                  ),
+                  onPressed: () =>
+                      ref.read(presetsProvider.notifier).setDefault(preset.id),
+                ),
+                title: Row(
+                  children: [
+                    Text(preset.name),
+                    if (preset.isDefault) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'DEFAULT',
+                          style: TextStyle(
+                            color: Colors.amber,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
                 subtitle: Text(
                   '${preset.protocol.name.toUpperCase()} · ${preset.displayTarget}',
                   style: const TextStyle(
@@ -232,6 +265,13 @@ class PresetEditorScreen extends StatefulWidget {
               BroadcastProtocol.rtmp => _rtmpFields(),
               BroadcastProtocol.webrtc => _webrtcFields(),
             },
+            const SizedBox(height: 12),
+            SwitchListTile(
+              title: const Text('Default Destination'),
+              subtitle: const Text('Automatically use this destination when streaming'),
+              value: _preset.isDefault,
+              onChanged: (v) => setState(() => _preset = _preset.copyWith(isDefault: v)),
+            ),
             const SizedBox(height: 12),
           ],
         ),
@@ -504,7 +544,7 @@ class _EncoderSection extends ConsumerWidget {
               ),
             ),
             _row(
-              'OLED Power Saver (Auto-dim when live)',
+              'OLED Power Saver (Auto-dim when idle)',
               Switch(
                 value: encoder.oledPowerSaverEnabled,
                 onChanged: (v) =>

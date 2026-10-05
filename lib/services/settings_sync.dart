@@ -33,22 +33,7 @@ Future<void> saveConfigToFirestore(
       'updatedAt': FieldValue.serverTimestamp(),
     };
     if (destinations != null) {
-      data['destinations'] = destinations
-          .map(
-            (d) => {
-              'id': d.id,
-              'name': d.name,
-              'protocol': d.protocol.name,
-              'host': d.host,
-              'port': d.port,
-              'streamId': d.streamId,
-              'passphrase': d.passphrase,
-              'latencyMs': d.latencyMs,
-              'rtmpUrl': d.rtmpUrl,
-              'streamKey': d.streamKey,
-            },
-          )
-          .toList();
+      data['destinations'] = destinations.map((d) => d.toJson()).toList();
     }
     await FirebaseFirestore.instance
         .collection('broadcastConfig')

@@ -81,6 +81,7 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
     final encoder = await ref.read(encoderSettingsProvider.future);
     await ref.read(broadcastControllerProvider.notifier).initialize(encoder);
     _restartChromeTimer();
+    _resetInactivityTimer();
   }
 
   void _restartChromeTimer() {
@@ -94,10 +95,10 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
     }
     final isLive = ref.read(broadcastControllerProvider).isLive;
     final encoder = ref.read(encoderSettingsProvider).valueOrNull;
-    if (isLive && (encoder?.oledPowerSaverEnabled ?? true)) {
+    if (!isLive && (encoder?.oledPowerSaverEnabled ?? true)) {
       final timeout = encoder?.oledPowerSaverTimeoutSeconds ?? 15;
       _inactivityTimer = Timer(Duration(seconds: timeout), () {
-        if (mounted && ref.read(broadcastControllerProvider).isLive) {
+        if (mounted && !ref.read(broadcastControllerProvider).isLive) {
           setState(() => _oledDimmed = true);
         }
       });
@@ -122,9 +123,15 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
       _openSettings();
       return;
     }
-    final preset = presets.length == 1
-        ? presets.first
-        : await _pickPreset(presets);
+    DestinationPreset? defaultPreset;
+    for (final p in presets) {
+      if (p.isDefault) {
+        defaultPreset = p;
+        break;
+      }
+    }
+    final preset = defaultPreset ??
+        (presets.length == 1 ? presets.first : await _pickPreset(presets));
     if (preset == null) return;
     await ref.read(broadcastControllerProvider.notifier).goLive(preset);
     _reportStatus(true, preset);
@@ -161,14 +168,55 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
             ),
             for (final preset in presets)
               ListTile(
-                title: Text(preset.name),
+                title: Row(
+                  children: [
+                    Text(preset.name),
+                    if (preset.isDefault) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'DEFAULT',
+                          style: TextStyle(
+                            color: Colors.amber,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
                 subtitle: Text(
-                  preset.displayTarget,
+                  '${preset.protocol.name.toUpperCase()} · ${preset.displayTarget}',
                   style: const TextStyle(
                     color: ControlRoomColors.textSecondary,
                   ),
                 ),
-                leading: const Icon(Icons.cell_tower),
+                leading: Icon(
+                  preset.protocol == BroadcastProtocol.webrtc
+                      ? Icons.wifi_tethering
+                      : preset.protocol == BroadcastProtocol.rtmp
+                      ? Icons.live_tv
+                      : Icons.cell_tower,
+                  color: preset.isDefault ? Colors.amber : null,
+                ),
+                trailing: IconButton(
+                  icon: Icon(
+                    preset.isDefault ? Icons.star : Icons.star_border,
+                    color: preset.isDefault ? Colors.amber : Colors.white38,
+                  ),
+                  onPressed: () {
+                    ref.read(presetsProvider.notifier).setDefault(preset.id);
+                  },
+                ),
                 onTap: () => Navigator.of(context).pop(preset),
               ),
           ],
@@ -205,6 +253,8 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
     final streamUrl = preset != null
         ? preset.protocol == BroadcastProtocol.srt
               ? 'srt://${preset.host}:${preset.port}${preset.streamId.isNotEmpty ? '?streamid=${preset.streamId}' : ''}'
+              : preset.protocol == BroadcastProtocol.webrtc
+              ? preset.webrtcUrl
               : preset.rtmpUrl.isNotEmpty
               ? '${preset.rtmpUrl}/${preset.streamKey}'
               : ''

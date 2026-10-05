@@ -126,7 +126,7 @@ class WhipEngine(private val context: Context) {
 
     private var previewWidth = 1280
     private var previewHeight = 720
-    private var previewFps = 30
+    private var previewFps = 25
 
     fun setPreviewConfig(width: Int, height: Int, fps: Int) {
         previewWidth = width

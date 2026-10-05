@@ -14,6 +14,7 @@ class DestinationPreset {
     this.rtmpUrl = '',
     this.streamKey = '',
     this.webrtcUrl = '',
+    this.isDefault = false,
   });
 
   final String id;
@@ -27,6 +28,7 @@ class DestinationPreset {
   final String rtmpUrl;
   final String streamKey;
   final String webrtcUrl;
+  final bool isDefault;
 
   DestinationConfig toDestinationConfig() {
     switch (protocol) {
@@ -56,6 +58,7 @@ class DestinationPreset {
     String? rtmpUrl,
     String? streamKey,
     String? webrtcUrl,
+    bool? isDefault,
   }) =>
       DestinationPreset(
         id: id,
@@ -69,6 +72,7 @@ class DestinationPreset {
         rtmpUrl: rtmpUrl ?? this.rtmpUrl,
         streamKey: streamKey ?? this.streamKey,
         webrtcUrl: webrtcUrl ?? this.webrtcUrl,
+        isDefault: isDefault ?? this.isDefault,
       );
 
   Map<String, Object?> toJson() => {
@@ -83,6 +87,7 @@ class DestinationPreset {
         'rtmpUrl': rtmpUrl,
         'streamKey': streamKey,
         'webrtcUrl': webrtcUrl,
+        'isDefault': isDefault,
       };
 
   static DestinationPreset fromJson(Map<String, Object?> json) => DestinationPreset(
@@ -100,6 +105,7 @@ class DestinationPreset {
         rtmpUrl: json['rtmpUrl'] as String? ?? '',
         streamKey: json['streamKey'] as String? ?? '',
         webrtcUrl: json['webrtcUrl'] as String? ?? '',
+        isDefault: json['isDefault'] as bool? ?? false,
       );
 
   /// Short human-readable target, e.g. `srt://10.0.0.5:8890` or `ws://...`.

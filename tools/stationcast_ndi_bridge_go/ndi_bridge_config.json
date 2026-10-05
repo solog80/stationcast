@@ -1,5 +1,17 @@
 {
   "host": "75.119.149.43",
-  "stream": "field1",
-  "ndi_name": "Field_1_StationCast"
+  "streams": [
+    {
+      "stream": "field1",
+      "ndi_name": "Field_1_StationCast",
+      "standby_image": "smpte_color_bars.webp"
+    },
+    {
+      "stream": "field2",
+      "ndi_name": "Field_2_StationCast",
+      "standby_image": "smpte_color_bars.webp"
+    }
+  ],
+  "enable_logs": true,
+  "verbose_logs": false
 }

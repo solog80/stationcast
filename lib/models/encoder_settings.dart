@@ -24,6 +24,8 @@ class EncoderSettings {
     this.codec = BroadcastVideoCodec.h264,
     this.mirrorFrontCamera = false,
     this.recording = const RecordingSettings(),
+    this.oledPowerSaverEnabled = true,
+    this.oledPowerSaverTimeoutSeconds = 15,
   });
 
   final ResolutionPreset resolution;
@@ -33,6 +35,8 @@ class EncoderSettings {
   final BroadcastVideoCodec codec;
   final bool mirrorFrontCamera;
   final RecordingSettings recording;
+  final bool oledPowerSaverEnabled;
+  final int oledPowerSaverTimeoutSeconds;
 
   EncoderConfig toEncoderConfig() => EncoderConfig(
     width: resolution.width,
@@ -51,6 +55,8 @@ class EncoderSettings {
     BroadcastVideoCodec? codec,
     bool? mirrorFrontCamera,
     RecordingSettings? recording,
+    bool? oledPowerSaverEnabled,
+    int? oledPowerSaverTimeoutSeconds,
   }) => EncoderSettings(
     resolution: resolution ?? this.resolution,
     fps: fps ?? this.fps,
@@ -59,6 +65,8 @@ class EncoderSettings {
     codec: codec ?? this.codec,
     mirrorFrontCamera: mirrorFrontCamera ?? this.mirrorFrontCamera,
     recording: recording ?? this.recording,
+    oledPowerSaverEnabled: oledPowerSaverEnabled ?? this.oledPowerSaverEnabled,
+    oledPowerSaverTimeoutSeconds: oledPowerSaverTimeoutSeconds ?? this.oledPowerSaverTimeoutSeconds,
   );
 
   Map<String, Object?> toJson() => {
@@ -69,6 +77,8 @@ class EncoderSettings {
     'codec': codec.name,
     'mirrorFrontCamera': mirrorFrontCamera,
     'recording': recording.toJson(),
+    'oledPowerSaverEnabled': oledPowerSaverEnabled,
+    'oledPowerSaverTimeoutSeconds': oledPowerSaverTimeoutSeconds,
   };
 
   static EncoderSettings fromJson(Map<String, Object?> json) => EncoderSettings(
@@ -87,5 +97,7 @@ class EncoderSettings {
     recording: json['recording'] != null
         ? RecordingSettings.fromJson(json['recording'] as Map<String, Object?>)
         : const RecordingSettings(),
+    oledPowerSaverEnabled: (json['oledPowerSaverEnabled'] as bool?) ?? true,
+    oledPowerSaverTimeoutSeconds: (json['oledPowerSaverTimeoutSeconds'] as num?)?.toInt() ?? 15,
   );
 }

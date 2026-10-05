@@ -26,11 +26,12 @@ typedef struct HWDecoderWrapper {
     int bgra_cap;
 } HWDecoderWrapper;
 
-static HWDecoderWrapper* create_hw_decoder() {
+static HWDecoderWrapper* create_hw_decoder(int is_h264) {
     HWDecoderWrapper* dec = (HWDecoderWrapper*)calloc(1, sizeof(HWDecoderWrapper));
     if (!dec) return NULL;
 
-    const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_VP8);
+    enum AVCodecID codec_id = is_h264 ? AV_CODEC_ID_H264 : AV_CODEC_ID_VP8;
+    const AVCodec* codec = avcodec_find_decoder(codec_id);
     if (!codec) {
         free(dec);
         return NULL;
@@ -155,6 +156,7 @@ static bool decode_hw_frame(HWDecoderWrapper* dec, const uint8_t* data, int data
 import "C"
 import (
 	"errors"
+	"strings"
 	"unsafe"
 )
 
@@ -162,8 +164,12 @@ type CgoVideoDecoder struct {
 	dec *C.HWDecoderWrapper
 }
 
-func NewVideoDecoder() (VideoDecoder, error) {
-	dec := C.create_hw_decoder()
+func NewVideoDecoder(mimeType string) (VideoDecoder, error) {
+	isH264 := 0
+	if strings.Contains(strings.ToLower(mimeType), "h264") {
+		isH264 = 1
+	}
+	dec := C.create_hw_decoder(C.int(isH264))
 	if dec == nil {
 		return nil, errors.New("failed to initialize Cgo GPU hardware decoder")
 	}

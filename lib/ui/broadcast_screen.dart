@@ -42,9 +42,11 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
   bool _permissionsDenied = false;
   bool _chromeVisible = true;
   bool _cameraSettingsOpen = false;
+  bool _oledDimmed = false;
   Timer? _chromeTimer;
   Timer? _statusTimer;
   Timer? _snapshotTimer;
+  Timer? _inactivityTimer;
 
   @override
   void initState() {
@@ -58,6 +60,8 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
     WidgetsBinding.instance.removeObserver(this);
     _chromeTimer?.cancel();
     _statusTimer?.cancel();
+    _snapshotTimer?.cancel();
+    _inactivityTimer?.cancel();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
@@ -81,17 +85,29 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
 
   void _restartChromeTimer() {
     _chromeTimer?.cancel();
-    // Keep UI visible at all times for broadcast app - operators need quick access
-    // _chromeTimer = Timer(const Duration(seconds: 5), () {
-    //   if (mounted && ref.read(broadcastControllerProvider).isLive) {
-    //     setState(() => _chromeVisible = false);
-    //   }
-    // });
+  }
+
+  void _resetInactivityTimer() {
+    _inactivityTimer?.cancel();
+    if (_oledDimmed && mounted) {
+      setState(() => _oledDimmed = false);
+    }
+    final isLive = ref.read(broadcastControllerProvider).isLive;
+    final encoder = ref.read(encoderSettingsProvider).valueOrNull;
+    if (isLive && (encoder?.oledPowerSaverEnabled ?? true)) {
+      final timeout = encoder?.oledPowerSaverTimeoutSeconds ?? 15;
+      _inactivityTimer = Timer(Duration(seconds: timeout), () {
+        if (mounted && ref.read(broadcastControllerProvider).isLive) {
+          setState(() => _oledDimmed = true);
+        }
+      });
+    }
   }
 
   void _onScreenTap() {
     setState(() => _chromeVisible = true);
     _restartChromeTimer();
+    _resetInactivityTimer();
   }
 
   Future<void> _goLive() async {
@@ -276,6 +292,7 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
           stats: stats,
           feedState: feedState,
           chromeVisible: _chromeVisible,
+          oledDimmed: _oledDimmed,
           cameraSettingsOpen: _cameraSettingsOpen,
           onCameraSettingsToggle: () =>
               setState(() => _cameraSettingsOpen = !_cameraSettingsOpen),
@@ -293,6 +310,7 @@ class _BroadcastLayout extends ConsumerWidget {
   final StreamStats? stats;
   final ReturnFeedUiState feedState;
   final bool chromeVisible;
+  final bool oledDimmed;
   final bool cameraSettingsOpen;
   final VoidCallback onCameraSettingsToggle;
   final VoidCallback onGoLive;
@@ -304,6 +322,7 @@ class _BroadcastLayout extends ConsumerWidget {
     required this.stats,
     required this.feedState,
     required this.chromeVisible,
+    required this.oledDimmed,
     required this.cameraSettingsOpen,
     required this.onCameraSettingsToggle,
     required this.onGoLive,
@@ -344,6 +363,7 @@ class _BroadcastLayout extends ConsumerWidget {
                 // Overlays layer - rebuilds independently
                 _OverlaysLayer(
                   chromeVisible: chromeVisible,
+                  oledDimmed: oledDimmed,
                   cameraSettingsOpen: cameraSettingsOpen,
                   onCameraSettingsToggle: onCameraSettingsToggle,
                   state: state,
@@ -741,6 +761,7 @@ class _CameraLayerState extends ConsumerState<_CameraLayer>
 
 class _OverlaysLayer extends ConsumerWidget {
   final bool chromeVisible;
+  final bool oledDimmed;
   final bool cameraSettingsOpen;
   final VoidCallback onCameraSettingsToggle;
   final BroadcastUiState state;
@@ -752,6 +773,7 @@ class _OverlaysLayer extends ConsumerWidget {
 
   const _OverlaysLayer({
     required this.chromeVisible,
+    required this.oledDimmed,
     required this.cameraSettingsOpen,
     required this.onCameraSettingsToggle,
     required this.state,
@@ -771,7 +793,7 @@ class _OverlaysLayer extends ConsumerWidget {
       children: [
         // Chrome UI overlay
         _ChromeOverlay(
-          visible: chromeVisible,
+          visible: chromeVisible && !oledDimmed,
           state: state,
           stats: stats,
           feedState: feedState,
@@ -784,6 +806,7 @@ class _OverlaysLayer extends ConsumerWidget {
 
         // Camera controls strip — right edge in landscape
         if (chromeVisible &&
+            !oledDimmed &&
             MediaQuery.of(context).orientation == Orientation.landscape)
           Positioned(
             right: 8,
@@ -792,7 +815,7 @@ class _OverlaysLayer extends ConsumerWidget {
           ),
 
         // Audio meter
-        if (chromeVisible && stats != null && state.isLive)
+        if (chromeVisible && !oledDimmed && stats != null && state.isLive)
           Positioned(
             left: 12,
             top: 0,
@@ -803,11 +826,11 @@ class _OverlaysLayer extends ConsumerWidget {
           ),
 
         // Histogram — inside safe area guide bottom-right
-        if (chromeVisible && state.showHistogram)
+        if (chromeVisible && !oledDimmed && state.showHistogram)
           Positioned(
             right: size.width * 0.12,
             bottom: size.height * 0.12,
-            child: const HistogramOverlay(),
+            child: const RepaintBoundary(child: HistogramOverlay()),
           ),
 
         // Error message
@@ -838,7 +861,7 @@ class _OverlaysLayer extends ConsumerWidget {
           ),
 
         // Camera settings popup overlay
-        if (cameraSettingsOpen)
+        if (cameraSettingsOpen && !oledDimmed)
           Positioned(
             right: 12,
             top: 80,
@@ -885,8 +908,46 @@ class _OverlaysLayer extends ConsumerWidget {
             ),
           ),
 
-        // Dim overlay when chrome is hidden
-        if (!chromeVisible)
+        // OLED Power Saver dim overlay when inactive while live
+        if (oledDimmed)
+          Positioned.fill(
+            child: RepaintBoundary(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.88),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.battery_saver,
+                        color: ControlRoomColors.amber.withValues(alpha: 0.8),
+                        size: 44,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'OLED Power Saver Active',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.85),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Tap screen to wake camera preview',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.45),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          )
+        else if (!chromeVisible)
           Positioned.fill(
             child: RepaintBoundary(
               child: Container(color: Colors.black.withValues(alpha: 0.4)),

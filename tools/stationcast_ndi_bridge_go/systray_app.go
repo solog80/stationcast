@@ -26,26 +26,33 @@ func generateTrayIconPNG() []byte {
 	w, h := 32, 32
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 
-	// Draw dark blue badge circle with "SC" broadcast symbol
+	// Draw vibrant red broadcast circle badge (#DC2626) with white contrast border
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			dx := x - 16
 			dy := y - 16
-			if dx*dx+dy*dy <= 14*14 {
-				img.Set(x, y, color.RGBA{R: 2, G: 132, B: 199, A: 255})
+			distSq := dx*dx + dy*dy
+			if distSq <= 14*14 {
+				if distSq >= 12*12 {
+					// High-contrast white border ring
+					img.Set(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+				} else {
+					// Vibrant Live Broadcast Red
+					img.Set(x, y, color.RGBA{R: 220, G: 38, B: 38, A: 255})
+				}
 			} else {
 				img.Set(x, y, color.RGBA{R: 0, G: 0, B: 0, A: 0})
 			}
 		}
 	}
 
-	// Inner live indicator dot
-	for y := 12; y <= 20; y++ {
-		for x := 12; x <= 20; x++ {
+	// Inner white live core dot
+	for y := 10; y <= 22; y++ {
+		for x := 10; x <= 22; x++ {
 			dx := x - 16
 			dy := y - 16
-			if dx*dx+dy*dy <= 4*4 {
-				img.Set(x, y, color.RGBA{R: 248, G: 250, B: 252, A: 255})
+			if dx*dx+dy*dy <= 5*5 {
+				img.Set(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
 			}
 		}
 	}
@@ -55,19 +62,20 @@ func generateTrayIconPNG() []byte {
 	return buf.Bytes()
 }
 
-func setupSystray(engine *BridgeEngine, port int) {
+func setupSystray(manager *EngineManager, port int) {
 	systray.Run(func() {
 		iconData := generateTrayIconPNG()
+		systray.SetIcon(iconData)
 		systray.SetTemplateIcon(iconData, iconData)
 		systray.SetTitle("SC")
-		systray.SetTooltip("StationCast OME to NDI Bridge")
+		systray.SetTooltip("StationCast Multi-Stream NDI Bridge")
 		systray.CreateMenu()
 
-		mStatus = systray.AddMenuItem("Status: Initializing...", "Current Stream Status")
+		mStatus = systray.AddMenuItem("Status: Initializing...", "Current Multi-Stream Status")
 		mStatus.Disable()
 
 		mOpenDash = systray.AddMenuItem("🌐 Open Web Dashboard", "Open Dashboard in Browser")
-		mForceKey = systray.AddMenuItem("⚡ Force Keyframe (PLI)", "Send Keyframe Request")
+		mForceKey = systray.AddMenuItem("⚡ Force Keyframe All (PLI)", "Send Keyframe Request to All Streams")
 		systray.AddSeparator()
 
 		autoStartEnabled := isAutoStartEnabled()
@@ -86,8 +94,8 @@ func setupSystray(engine *BridgeEngine, port int) {
 		})
 
 		mForceKey.Click(func() {
-			engine.RequestPLI()
-			addLog("⚡ Manual Keyframe (PLI) requested from system tray")
+			manager.RequestPLI("")
+			addLog("⚡ Manual Keyframe (PLI) requested for all streams from system tray")
 		})
 
 		mAutoStart.Click(func() {
@@ -102,7 +110,7 @@ func setupSystray(engine *BridgeEngine, port int) {
 		})
 
 		mQuit.Click(func() {
-			engine.Stop()
+			manager.StopAll()
 			systray.Quit()
 			os.Exit(0)
 		})
@@ -111,18 +119,22 @@ func setupSystray(engine *BridgeEngine, port int) {
 		go func() {
 			for {
 				time.Sleep(1 * time.Second)
-				state.Lock()
-				statusText := fmt.Sprintf("Status: %s (%s)", state.Status, state.Mode)
-				if state.FPS > 0 {
-					statusText = fmt.Sprintf("Status: %s (%dx%d @ %d FPS)", state.Status, 1280, 720, state.FPS)
+				appState.Lock()
+				liveCount := 0
+				totalCount := len(appState.Streams)
+				for _, st := range appState.Streams {
+					if st.StatusColor == "green" {
+						liveCount++
+					}
 				}
-				state.Unlock()
+				statusText := fmt.Sprintf("Status: %d/%d Streams Live", liveCount, totalCount)
+				appState.Unlock()
 
 				mStatus.SetTitle(statusText)
 			}
 		}()
 
 	}, func() {
-		engine.Stop()
+		manager.StopAll()
 	})
 }

@@ -104,9 +104,9 @@ class WhipEngine(private val context: Context) {
 
             audioDeviceModule = adm
 
-            val encoderFactory = DefaultVideoEncoderFactory(
+            val encoderFactory = HardwareVideoEncoderFactory(
                 rootEglBase?.eglBaseContext,
-                /* enableIntelVp8Encoder */ true,
+                /* enableIntelVp8Encoder */ false,
                 /* enableH264HighProfile */ true
             )
             val decoderFactory = DefaultVideoDecoderFactory(rootEglBase?.eglBaseContext)
@@ -259,6 +259,7 @@ class WhipEngine(private val context: Context) {
                     }
                 }
 
+
                 // 4. Create SDP Offer
                 val mediaConstraints = MediaConstraints().apply {
                     mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
@@ -297,7 +298,8 @@ class WhipEngine(private val context: Context) {
                 // Wait for ICE gathering to complete or have initial candidates in SDP
                 delay(300) // brief delay to allow candidate gathering into localDescription
 
-                val currentLocalSdp = peerConnection?.localDescription?.description ?: offerSdp.description
+                val rawLocalSdp = peerConnection?.localDescription?.description ?: offerSdp.description
+                val currentLocalSdp = preferH264InSdp(rawLocalSdp)
                 Log.d(tag, "Sending WHIP Offer SDP to $whipUrl:\n$currentLocalSdp")
 
                 // 5. HTTP POST to WHIP Endpoint
@@ -447,6 +449,18 @@ class WhipEngine(private val context: Context) {
         }
     }
 
+    fun setVideoBitrate(bps: Int) {
+        peerConnection?.senders?.firstOrNull { it.track()?.kind() == "video" }?.let { sender ->
+            val params = sender.parameters
+            if (params.encodings.isNotEmpty()) {
+                params.encodings[0].maxBitrateBps = bps
+                sender.parameters = params
+                Log.d(tag, "WebRTC video maxBitrateBps updated to $bps")
+            }
+        }
+    }
+
+
     fun stopCameraPreview() {
         stopWhipStream(keepPreview = false)
     }
@@ -512,7 +526,7 @@ class WhipEngine(private val context: Context) {
                         ))
                     }
                 }
-                delay(200)
+                delay(250)
             }
         }
     }
@@ -528,5 +542,44 @@ class WhipEngine(private val context: Context) {
         override fun onSetSuccess() {}
         override fun onCreateFailure(error: String?) {}
         override fun onSetFailure(error: String?) {}
+    }
+
+    private fun preferH264InSdp(sdp: String): String {
+        val lines = sdp.split("\n").toMutableList()
+        val h264Pts = mutableListOf<String>()
+
+        for (line in lines) {
+            val lTrim = line.trim()
+            if (lTrim.startsWith("a=rtpmap:") && lTrim.contains("H264/", ignoreCase = true)) {
+                val parts = lTrim.removePrefix("a=rtpmap:").split(" ")
+                if (parts.isNotEmpty()) {
+                    h264Pts.add(parts[0])
+                }
+            }
+        }
+
+        if (h264Pts.isEmpty()) return sdp
+
+        for (i in lines.indices) {
+            val lTrim = lines[i].trim()
+            if (lTrim.startsWith("m=video ")) {
+                val fields = lTrim.split(" ").filter { it.isNotEmpty() }
+                if (fields.size >= 4) {
+                    val header = fields.subList(0, 3)
+                    val pts = fields.subList(3, fields.size)
+
+                    val newPts = mutableListOf<String>()
+                    newPts.addAll(h264Pts)
+                    for (pt in pts) {
+                        if (!h264Pts.contains(pt)) {
+                            newPts.add(pt)
+                        }
+                    }
+                    lines[i] = (header + newPts).joinToString(" ")
+                }
+            }
+        }
+
+        return lines.joinToString("\n")
     }
 }

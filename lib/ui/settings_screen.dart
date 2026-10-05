@@ -503,6 +503,14 @@ class _EncoderSection extends ConsumerWidget {
                     notifier.save(encoder.copyWith(mirrorFrontCamera: v)),
               ),
             ),
+            _row(
+              'OLED Power Saver (Auto-dim when live)',
+              Switch(
+                value: encoder.oledPowerSaverEnabled,
+                onChanged: (v) =>
+                    notifier.save(encoder.copyWith(oledPowerSaverEnabled: v)),
+              ),
+            ),
             const Text(
               'Encoder changes apply on next app start or after re-initializing the camera.',
               style: TextStyle(

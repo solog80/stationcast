@@ -204,6 +204,7 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 val protocol = args["protocol"] as String?
                 if (protocol == "webrtc") {
                     engine.stopAudioProbe()
+                    engine.onPreviewModeChanged?.invoke("webrtc")
                     val webrtcUrl = args["webrtcUrl"] as String? ?: ""
                     val width = (args["width"] as Number? ?: 1280).toInt()
                     val height = (args["height"] as Number? ?: 720).toInt()
@@ -212,18 +213,24 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     whipEngine.startWhipStream(webrtcUrl, width, height, fps, bps)
                 } else {
                     whipEngine.stopCameraPreview()
+                    engine.onPreviewModeChanged?.invoke("streampack")
+                    kotlinx.coroutines.delay(150)
                     engine.startStream(args)
                 }
                 result.success(null)
             }
             "stopStream" -> launchCatching(result) {
-                whipEngine.stopWhipStream(keepPreview = true)
+                whipEngine.stopWhipStream(keepPreview = false)
                 engine.stopStream()
+                engine.onPreviewModeChanged?.invoke("webrtc")
+                whipEngine.ensureCameraPreview()
                 result.success(null)
             }
             "switchCamera" -> launchCatching(result) {
                 whipEngine.switchCamera()
-                engine.switchCamera()
+                if (engine.streamer != null) {
+                    engine.switchCamera()
+                }
                 result.success(null)
             }
             "setTorch" -> launchCatching(result) {
@@ -247,6 +254,7 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 } else {
                     launchCatching(result) {
                         engine.setVideoBitrate(bps)
+                        whipEngine.setVideoBitrate(bps)
                         result.success(null)
                     }
                 }

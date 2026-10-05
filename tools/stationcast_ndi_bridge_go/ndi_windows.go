@@ -5,6 +5,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -50,16 +54,154 @@ type NDISender struct {
 	mu       sync.Mutex
 }
 
-func NewNDISender(ndiName string) (*NDISender, error) {
-	dllName := "Processing.NDI.Lib.x64.dll"
-	dll := syscall.NewLazyDLL(dllName)
-	if err := dll.Load(); err != nil {
-		dllName = "Processing.NDI.Lib.x86.dll"
-		dll = syscall.NewLazyDLL(dllName)
-		if err2 := dll.Load(); err2 != nil {
-			return nil, fmt.Errorf("failed to load NDI DLL (%s): %v", dllName, err)
+func findNDIDLL() (*syscall.LazyDLL, string) {
+	var candidates []string
+
+	dllFileNames := []string{
+		"Processing.NDI.Lib.dll",
+		"Processing.NDI.Lib.x64.dll",
+		"Processing.NDI.Lib.x86.dll",
+	}
+
+	// 1. Environment variables set by NDI SDK / Runtime installers
+	envVars := []string{
+		"NDI_RUNTIME_DIR_V6",
+		"NDI_RUNTIME_DIR_V5",
+		"NDI_RUNTIME_DIR_V4",
+		"NDI_RUNTIME_DIR_V3",
+		"NDI_RUNTIME_DIR_V2",
+	}
+	for _, env := range envVars {
+		if dir := os.Getenv(env); dir != "" {
+			for _, fn := range dllFileNames {
+				candidates = append(candidates, filepath.Join(dir, fn))
+			}
 		}
 	}
+
+	// 2. Query Windows Registry for vMix installation directory
+	regKeys := []string{
+		`HKLM\SOFTWARE\vMix`,
+		`HKLM\SOFTWARE\WOW6432Node\vMix`,
+		`HKCU\Software\vMix`,
+	}
+	for _, regKey := range regKeys {
+		out, err := exec.Command("reg", "query", regKey, "/v", "InstallPath").Output()
+		if err == nil {
+			lines := strings.Split(string(out), "\r\n")
+			for _, line := range lines {
+				if strings.Contains(line, "REG_SZ") {
+					parts := strings.Split(line, "REG_SZ")
+					if len(parts) > 1 {
+						dir := strings.TrimSpace(parts[1])
+						for _, fn := range dllFileNames {
+							candidates = append(candidates, filepath.Join(dir, `ndi\x64`, fn))
+							candidates = append(candidates, filepath.Join(dir, `ndi\x86`, fn))
+							candidates = append(candidates, filepath.Join(dir, `ndi`, fn))
+							candidates = append(candidates, filepath.Join(dir, fn))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Known installation directories (vMix, NDI Tools, NDI Runtime, OBS)
+	programFilesDirs := []string{
+		os.Getenv("ProgramFiles"),
+		os.Getenv("ProgramFiles(x86)"),
+		`C:\Program Files`,
+		`C:\Program Files (x86)`,
+	}
+
+	subPaths := []string{
+		// Exact vMix NDI location (with Processing.NDI.Lib.dll and Processing.NDI.Lib.x64.dll)
+		`vMix\ndi\x64\Processing.NDI.Lib.dll`,
+		`vMix\ndi\x64\Processing.NDI.Lib.x64.dll`,
+		`vMix\ndi\x86\Processing.NDI.Lib.dll`,
+		`vMix\ndi\x86\Processing.NDI.Lib.x86.dll`,
+		`vMix\ndi\Processing.NDI.Lib.dll`,
+		`vMix\ndi\Processing.NDI.Lib.x64.dll`,
+		`vMix\Processing.NDI.Lib.dll`,
+		`vMix\Processing.NDI.Lib.x64.dll`,
+		`vMix\NDI\Processing.NDI.Lib.dll`,
+		`vMix\NDI\Processing.NDI.Lib.x64.dll`,
+
+		// Official NDI Tools / Runtime locations
+		`NDI\NDI 6 Tools\Runtime\Processing.NDI.Lib.x64.dll`,
+		`NDI\NDI 5 Tools\Runtime\Processing.NDI.Lib.x64.dll`,
+		`NDI\NDI 4 Tools\Runtime\Processing.NDI.Lib.x64.dll`,
+		`NDI\NDI Tools\Runtime\Processing.NDI.Lib.x64.dll`,
+
+		`NDI\NDI 6 Tools\Runtime\Processing.NDI.Lib.dll`,
+		`NDI\NDI 5 Tools\Runtime\Processing.NDI.Lib.dll`,
+		`NDI\NDI 4 Tools\Runtime\Processing.NDI.Lib.dll`,
+		`NDI\NDI Tools\Runtime\Processing.NDI.Lib.dll`,
+
+		`NDI\NDI 6 Runtime\v6\Processing.NDI.Lib.x64.dll`,
+		`NDI\NDI 5 Runtime\v5\Processing.NDI.Lib.x64.dll`,
+		`NDI\NDI 4 Runtime\v4\Processing.NDI.Lib.x64.dll`,
+		`NDI\NDI Runtime\Processing.NDI.Lib.x64.dll`,
+
+		`NDI\NDI 6 Runtime\v6\Processing.NDI.Lib.dll`,
+		`NDI\NDI 5 Runtime\v5\Processing.NDI.Lib.dll`,
+		`NDI\NDI 4 Runtime\v4\Processing.NDI.Lib.dll`,
+		`NDI\NDI Runtime\Processing.NDI.Lib.dll`,
+
+		`NDI\NDI Tools\v6\Processing.NDI.Lib.x64.dll`,
+		`NDI\NDI Tools\v5\Processing.NDI.Lib.x64.dll`,
+		`NDI\NDI SDK for Windows\bin\x64\Processing.NDI.Lib.x64.dll`,
+		`NDI\NDI SDK for Windows\bin\x64\Processing.NDI.Lib.dll`,
+
+		// OBS Studio NDI plugin locations
+		`obs-studio\data\obs-plugins\obs-ndi\Processing.NDI.Lib.x64.dll`,
+		`obs-studio\data\obs-plugins\obs-ndi\Processing.NDI.Lib.dll`,
+		`obs-studio\obs-plugins\64bit\Processing.NDI.Lib.x64.dll`,
+		`obs-studio\obs-plugins\64bit\Processing.NDI.Lib.dll`,
+	}
+
+	for _, pf := range programFilesDirs {
+		if pf == "" {
+			continue
+		}
+		for _, sp := range subPaths {
+			candidates = append(candidates, filepath.Join(pf, sp))
+		}
+	}
+
+	// 4. Direct system/PATH fallbacks
+	candidates = append(candidates, "Processing.NDI.Lib.dll")
+	candidates = append(candidates, "Processing.NDI.Lib.x64.dll")
+	candidates = append(candidates, "Processing.NDI.Lib.x86.dll")
+
+	// Set DLL search directory so dependency resolution (other DLLs in same dir) succeeds
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	setDllDirProc := kernel32.NewProc("SetDllDirectoryW")
+
+	for _, path := range candidates {
+		dir := filepath.Dir(path)
+		if dir != "." && dir != "" {
+			if dirPtr, err := syscall.UTF16PtrFromString(dir); err == nil {
+				_, _, _ = setDllDirProc.Call(uintptr(unsafe.Pointer(dirPtr)))
+			}
+		}
+
+		dll := syscall.NewLazyDLL(path)
+		if err := dll.Load(); err == nil {
+			return dll, path
+		}
+	}
+
+	return nil, ""
+}
+
+func NewNDISender(ndiName string) (*NDISender, error) {
+	dll, loadedPath := findNDIDLL()
+	if dll == nil {
+		return nil, errors.New("failed to load NDI DLL (Processing.NDI.Lib.dll / Processing.NDI.Lib.x64.dll not found in System, vMix, or NDI Runtime paths)")
+	}
+
+	addLog(fmt.Sprintf("✅ NDI Windows DLL loaded from: %s", loadedPath))
 
 	sender := &NDISender{
 		dll:       dll,
@@ -68,6 +210,10 @@ func NewNDISender(ndiName string) (*NDISender, error) {
 		pCreate:   dll.NewProc("NDIlib_send_create"),
 		pSDestroy: dll.NewProc("NDIlib_send_destroy"),
 		pSend:     dll.NewProc("NDIlib_send_send_video_v2"),
+	}
+
+	if err := sender.pInit.Find(); err != nil {
+		return nil, fmt.Errorf("NDIlib_initialize procedure not found in DLL: %v", err)
 	}
 
 	ret, _, err := sender.pInit.Call()
@@ -188,7 +334,7 @@ func (b *NDIBridge) runStandbyLoop() {
 		case <-ticker.C:
 			b.Lock()
 			timeSinceLive := time.Since(b.lastLiveFrameTime)
-			if timeSinceLive > 500*time.Millisecond && len(b.standbyFrame) > 0 && b.sender != nil {
+			if timeSinceLive > 1500*time.Millisecond && len(b.standbyFrame) > 0 && b.sender != nil {
 				b.sender.SendVideo(b.standbyWidth, b.standbyHeight, b.standbyFrame, b.standbyWidth*4)
 			}
 			b.Unlock()

@@ -49,6 +49,7 @@ class BroadcastEngine(private val context: Context) {
     var onEvent: ((String, String?) -> Unit)? = null
     var onStats: ((Map<String, Any?>) -> Unit)? = null
     var onHistogram: ((List<Int>) -> Unit)? = null
+    var onPreviewModeChanged: ((String) -> Unit)? = null
 
     private var statsJob: Job? = null
     private var watchJob: Job? = null
@@ -63,34 +64,47 @@ class BroadcastEngine(private val context: Context) {
 
     fun startHistogram() {
         if (histogramJob?.isActive == true) return
-        histogramJob = scope.launch(Dispatchers.Main) {
+        histogramJob = scope.launch(Dispatchers.Default) {
             val buf = IntArray(256)
+            val pixels = IntArray(128 * 72)
+            val normalizedList = ArrayList<Int>(256)
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
             while (isActive) {
                 val sv = previewSurfaceView ?: run { delay(500); continue }
                 val bitmap = try {
                     val b = android.graphics.Bitmap.createBitmap(128, 72, android.graphics.Bitmap.Config.ARGB_8888)
                     val lock = kotlinx.coroutines.CompletableDeferred<Boolean>()
-                    android.view.PixelCopy.request(sv, b, { lock.complete(it == android.view.PixelCopy.SUCCESS) }, android.os.Handler(android.os.Looper.getMainLooper()))
+                    android.view.PixelCopy.request(sv, b, { lock.complete(it == android.view.PixelCopy.SUCCESS) }, handler)
                     if (lock.await()) b else null
                 } catch (_: Exception) { null }
                 if (bitmap != null) {
                     val w = bitmap.width; val h = bitmap.height
-                    val pixels = IntArray(w * h)
-                    bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-                    buf.fill(0)
-                    for (p in pixels) {
-                        val r = (p shr 16) and 0xFF
-                        val g = (p shr 8) and 0xFF
-                        val b = p and 0xFF
-                        val luma = (0.299 * r + 0.587 * g + 0.114 * b).toInt().coerceIn(0, 255)
-                        buf[luma]++
+                    val totalPixels = w * h
+                    if (totalPixels <= pixels.size) {
+                        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+                        buf.fill(0)
+                        for (i in 0 until totalPixels) {
+                            val p = pixels[i]
+                            val r = (p shr 16) and 0xFF
+                            val g = (p shr 8) and 0xFF
+                            val b = p and 0xFF
+                            val luma = (0.299 * r + 0.587 * g + 0.114 * b).toInt().coerceIn(0, 255)
+                            buf[luma]++
+                        }
+                        var max = 1
+                        for (i in 0..255) { if (buf[i] > max) max = buf[i] }
+                        normalizedList.clear()
+                        for (i in 0..255) {
+                            normalizedList.add(buf[i] * 100 / max)
+                        }
+                        scope.launch(Dispatchers.Main) {
+                            onHistogram?.invoke(normalizedList)
+                        }
                     }
-                    val max = buf.maxOrNull() ?: 1
-                    val normalized = buf.map { (it * 100 / max.coerceAtLeast(1)) }
-                    onHistogram?.invoke(normalized)
                     bitmap.recycle()
                 }
-                delay(66)
+                delay(250) // 4 FPS update rate saves ~73% CPU load & heat
             }
         }
     }
@@ -228,6 +242,22 @@ class BroadcastEngine(private val context: Context) {
                         latency = (args["latencyMs"] as Number?)?.toInt()
                     )
                     current.first.startStream(descriptor)
+                }
+            }
+
+            // Attach preview surface to StreamPack camera source for live preview during SRT/RTMP
+            previewSurface?.let { surface ->
+                if (surface.isValid) {
+                    val src = cameraSource()
+                    if (src != null) {
+                        try {
+                            src.setPreview(surface)
+                            src.startPreview()
+                            android.util.Log.d("[BroadcastEngine]", "Attached preview surface to StreamPack camera source")
+                        } catch (e: Exception) {
+                            android.util.Log.w("[BroadcastEngine]", "Failed to set preview surface: ${e.message}")
+                        }
+                    }
                 }
             }
 
@@ -500,12 +530,17 @@ class BroadcastEngine(private val context: Context) {
     fun setMirrorFrontCamera(enabled: Boolean) = Unit
     fun setPreviewSurface(surface: android.view.Surface?) {
         previewSurface = surface
-        if (surface != null) {
+        if (surface != null && surface.isValid) {
             val src = cameraSource()
             if (src != null) {
                 scope.launch {
-                    src.setPreview(surface)
-                    src.startPreview()
+                    try {
+                        src.setPreview(surface)
+                        src.startPreview()
+                        android.util.Log.d("[BroadcastEngine]", "StreamPack setPreview surface succeeded")
+                    } catch (e: Exception) {
+                        android.util.Log.w("[BroadcastEngine]", "StreamPack setPreview surface error: ${e.message}")
+                    }
                 }
             }
         }

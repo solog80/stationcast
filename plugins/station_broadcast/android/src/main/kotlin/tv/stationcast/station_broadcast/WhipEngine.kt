@@ -483,20 +483,53 @@ class WhipEngine(private val context: Context) {
         return null
     }
 
+    private var lastBytesSent = 0L
+    private var lastStatsTimestampMs = 0L
+
+    private fun getBatteryTemperature(): Float {
+        return try {
+            val intent = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+            val temp = intent?.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
+            temp / 10.0f
+        } catch (_: Exception) { 0f }
+    }
+
+    private fun getCurrentThermalStatus(): String {
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            when (pm?.currentThermalStatus) {
+                android.os.PowerManager.THERMAL_STATUS_NONE -> "NONE"
+                android.os.PowerManager.THERMAL_STATUS_LIGHT -> "LIGHT"
+                android.os.PowerManager.THERMAL_STATUS_MODERATE -> "MODERATE"
+                android.os.PowerManager.THERMAL_STATUS_SEVERE -> "SEVERE"
+                android.os.PowerManager.THERMAL_STATUS_CRITICAL -> "CRITICAL"
+                android.os.PowerManager.THERMAL_STATUS_EMERGENCY -> "EMERGENCY"
+                android.os.PowerManager.THERMAL_STATUS_SHUTDOWN -> "SHUTDOWN"
+                else -> "UNKNOWN"
+            }
+        } else {
+            "UNSUPPORTED"
+        }
+    }
+
     private fun startStatsLoop() {
         statsJob?.cancel()
+        lastBytesSent = 0L
+        lastStatsTimestampMs = 0L
         statsJob = scope.launch {
             while (isStreamingActive) {
                 peerConnection?.getStats { report ->
+                    val nowMs = System.currentTimeMillis()
                     var bps = 0L
                     var rtt = 0
                     var pktsSent = 0L
                     var pktsLost = 0L
                     var currentAudioLevel = 0.0
+                    var totalBytesSent = 0L
 
                     for (stats in report.statsMap.values) {
                         if (stats.type == "outbound-rtp") {
-                            val bytes = (stats.members["bytesSent"] as? Number)?.toLong() ?: 0L
+                            totalBytesSent += (stats.members["bytesSent"] as? Number)?.toLong() ?: 0L
                             pktsSent += (stats.members["packetsSent"] as? Number)?.toLong() ?: 0L
                             pktsLost += (stats.members["packetsLost"] as? Number)?.toLong() ?: 0L
                             if (stats.members["kind"] == "audio" || stats.members["mediaType"] == "audio") {
@@ -505,8 +538,28 @@ class WhipEngine(private val context: Context) {
                         } else if (stats.type == "media-source" && (stats.members["kind"] == "audio" || stats.members["mediaType"] == "audio")) {
                             currentAudioLevel = (stats.members["audioLevel"] as? Number)?.toDouble() ?: currentAudioLevel
                         } else if (stats.type == "remote-inbound-rtp") {
-                            rtt = ((stats.members["roundTripTime"] as? Number)?.toDouble()?.times(1000))?.toInt() ?: 0
+                            val rttSec = (stats.members["roundTripTime"] as? Number)?.toDouble() ?: 0.0
+                            if (rttSec > 0) {
+                                rtt = (rttSec * 1000).toInt()
+                            }
+                        } else if (stats.type == "candidate-pair" && (stats.members["state"] == "succeeded" || stats.members["state"] == "in-use" || stats.members["writable"] == true)) {
+                            val pairRttSec = (stats.members["currentRoundTripTime"] as? Number)?.toDouble() ?: 0.0
+                            if (pairRttSec > 0 && rtt == 0) {
+                                rtt = (pairRttSec * 1000).toInt()
+                            }
                         }
+                    }
+
+                    if (lastStatsTimestampMs > 0 && nowMs > lastStatsTimestampMs) {
+                        val bytesDelta = totalBytesSent - lastBytesSent
+                        val timeDeltaSec = (nowMs - lastStatsTimestampMs) / 1000.0
+                        if (timeDeltaSec > 0 && bytesDelta >= 0) {
+                            bps = ((bytesDelta * 8) / timeDeltaSec).toLong()
+                        }
+                    }
+                    if (totalBytesSent > 0) {
+                        lastBytesSent = totalBytesSent
+                        lastStatsTimestampMs = nowMs
                     }
 
                     val db = if (currentAudioLevel > 0.00001) {
@@ -515,6 +568,11 @@ class WhipEngine(private val context: Context) {
                         -60.0
                     }
 
+                    val batteryTemp = getBatteryTemperature()
+                    val thermalStatus = getCurrentThermalStatus()
+                    val bitrateMbpsStr = String.format(java.util.Locale.US, "%.2f", bps / 1_000_000.0)
+                    Log.d("[ThermalDiag]", "Battery: ${batteryTemp}°C | ThermalStatus: $thermalStatus | WHIP Bitrate: ${bitrateMbpsStr} Mbps | RTT: ${rtt}ms | Dropped: $pktsLost")
+
                     scope.launch(Dispatchers.Main) {
                         onStats?.invoke(mapOf(
                             "bitrateBps" to bps,
@@ -522,11 +580,14 @@ class WhipEngine(private val context: Context) {
                             "packetsSent" to pktsSent,
                             "packetsDropped" to pktsLost,
                             "audioLevelDb" to listOf(db, db),
+                            "bandwidthMbps" to (bps / 1_000_000.0),
+                            "batteryTemp" to batteryTemp,
+                            "thermalStatus" to thermalStatus,
                             "protocol" to "webrtc"
                         ))
                     }
                 }
-                delay(250)
+                delay(1000)
             }
         }
     }

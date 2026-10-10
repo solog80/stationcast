@@ -37,6 +37,13 @@ type Config struct {
 	Streams      []StreamConfig `json:"streams,omitempty"`
 	EnableLogs   bool           `json:"enable_logs"`
 	VerboseLogs  bool           `json:"verbose_logs"`
+	// Transport forces the WebRTC media transport via OME's ?transport query param.
+	// "" = OME default (UDP+Direct TCP), "tcp" = Direct TCP ICE only (RFC 6544),
+	// "relay" = TURN relay, "all" = UDP+TCP+relay, "udp" = UDP only.
+	Transport string `json:"transport,omitempty"`
+	// PlayoutFrames is the NDI output jitter buffer depth in frames. Higher = smoother
+	// on lossy/long links (absorbs stalls) at the cost of added latency. 0 = default (6).
+	PlayoutFrames int `json:"playout_frames,omitempty"`
 }
 
 type StreamState struct {
@@ -53,24 +60,44 @@ type StreamState struct {
 
 type AppState struct {
 	sync.Mutex
-	Host        string                  `json:"host"`
-	EnableLogs  bool                    `json:"enable_logs"`
-	VerboseLogs bool                    `json:"verbose_logs"`
-	Streams     map[string]*StreamState `json:"streams"`
-	Logs        []string                `json:"logs"`
+	Host          string                  `json:"host"`
+	Transport     string                  `json:"transport"`
+	PlayoutFrames int                     `json:"playout_frames"`
+	EnableLogs    bool                    `json:"enable_logs"`
+	VerboseLogs   bool                    `json:"verbose_logs"`
+	Streams       map[string]*StreamState `json:"streams"`
+	Logs          []string                `json:"logs"`
 }
 
 var (
 	appState = AppState{
-		Host:        "75.119.149.43",
-		EnableLogs:  true,
-		VerboseLogs: false,
-		Streams:     make(map[string]*StreamState),
-		Logs:        make([]string, 0),
+		Host:          "158.220.126.145",
+		PlayoutFrames: 6,
+		EnableLogs:    true,
+		VerboseLogs:   false,
+		Streams:       make(map[string]*StreamState),
+		Logs:          make([]string, 0),
 	}
 	engineManager = NewEngineManager()
 	configFile    = "ndi_bridge_config.json"
 )
+
+// currentTransport returns the active WebRTC transport mode (guarded by appState).
+func currentTransport() string {
+	appState.Lock()
+	defer appState.Unlock()
+	return appState.Transport
+}
+
+// currentPlayoutFrames returns the configured NDI jitter buffer depth in frames.
+func currentPlayoutFrames() int {
+	appState.Lock()
+	defer appState.Unlock()
+	if appState.PlayoutFrames > 0 {
+		return appState.PlayoutFrames
+	}
+	return 6
+}
 
 func addLog(msg string) {
 	appState.Lock()
@@ -106,6 +133,10 @@ func loadConfig() {
 			}
 			appState.EnableLogs = cfg.EnableLogs
 			appState.VerboseLogs = cfg.VerboseLogs
+			appState.Transport = cfg.Transport
+			if cfg.PlayoutFrames > 0 {
+				appState.PlayoutFrames = cfg.PlayoutFrames
+			}
 
 			if len(cfg.Streams) > 0 {
 				for _, s := range cfg.Streams {
@@ -189,10 +220,12 @@ func saveConfig() {
 	}
 
 	cfg := Config{
-		Host:        appState.Host,
-		Streams:     streams,
-		EnableLogs:  appState.EnableLogs,
-		VerboseLogs: appState.VerboseLogs,
+		Host:          appState.Host,
+		Transport:     appState.Transport,
+		PlayoutFrames: appState.PlayoutFrames,
+		Streams:       streams,
+		EnableLogs:    appState.EnableLogs,
+		VerboseLogs:   appState.VerboseLogs,
 	}
 	if data, err := json.MarshalIndent(cfg, "", "  "); err == nil {
 		_ = os.WriteFile(configFile, data, 0644)
@@ -460,6 +493,12 @@ func (e *BridgeEngine) runLoop(host, stream, ndiName, standbyImg string) {
 			break
 		}
 
+		e.Lock()
+		if e.ndi != nil {
+			e.ndi.SetLiveState(false)
+		}
+		e.Unlock()
+
 		addLog(fmt.Sprintf("[%s] Waiting for stream publisher... Displaying SMPTE Color Bars (Retrying in 500ms)", stream))
 		appState.Lock()
 		if st, ok := appState.Streams[stream]; ok {
@@ -489,6 +528,9 @@ type OMEMessage struct {
 
 func (e *BridgeEngine) connectAndStream(host, stream string) bool {
 	wsURL := fmt.Sprintf("ws://%s:3333/app/%s", host, stream)
+	if t := currentTransport(); t != "" {
+		wsURL += "?transport=" + t
+	}
 	addLog(fmt.Sprintf("[%s] Connecting to OME WebSocket: %s", stream, wsURL))
 
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -546,6 +588,13 @@ func (e *BridgeEngine) connectAndStream(host, stream string) bool {
 	}
 
 	m := &webrtc.MediaEngine{}
+	rtcpFbVideo := []webrtc.RTCPFeedback{
+		{Type: webrtc.TypeRTCPFBNACK},
+		{Type: webrtc.TypeRTCPFBNACK, Parameter: "pli"},
+		{Type: webrtc.TypeRTCPFBTransportCC},
+		{Type: "goog-remb", Parameter: ""},
+	}
+
 	h264Fmtps := []string{
 		"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
 		"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
@@ -559,7 +608,7 @@ func (e *BridgeEngine) connectAndStream(host, stream string) bool {
 				ClockRate:    90000,
 				Channels:     0,
 				SDPFmtpLine:  fmtp,
-				RTCPFeedback: nil,
+				RTCPFeedback: rtcpFbVideo,
 			},
 			PayloadType: webrtc.PayloadType(102 + idx),
 		}, webrtc.RTPCodecTypeVideo)
@@ -571,10 +620,23 @@ func (e *BridgeEngine) connectAndStream(host, stream string) bool {
 			ClockRate:    90000,
 			Channels:     0,
 			SDPFmtpLine:  "",
-			RTCPFeedback: nil,
+			RTCPFeedback: rtcpFbVideo,
 		},
 		PayloadType: 96,
 	}, webrtc.RTPCodecTypeVideo)
+
+	// RTX (retransmission) for H.264. Without this the answer never negotiates NACK/RTX,
+	// so any packet lost on the (long) path to the server is gone for good — unlike a browser,
+	// which recovers it via retransmission. apt must match the H.264 payload type OME offers.
+	_ = m.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    "video/rtx",
+			ClockRate:   90000,
+			SDPFmtpLine: "apt=98",
+		},
+		PayloadType: 99,
+	}, webrtc.RTPCodecTypeVideo)
+	addLog(fmt.Sprintf("[%s] Registered RTX for H.264 (apt=98, pt=99) — NACK retransmission enabled", stream))
 
 	_ = m.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -595,6 +657,13 @@ func (e *BridgeEngine) connectAndStream(host, stream string) bool {
 
 	se := webrtc.SettingEngine{}
 	se.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+	se.SetICETimeouts(15*time.Second, 30*time.Second, 1*time.Second)
+	// Enable ICE-TCP (RFC 6544) when a TCP-ish transport is requested, so Pion can dial
+	// OME's Direct TCP ICE candidates on lossy/hostile networks.
+	if t := currentTransport(); t == "tcp" || t == "relay" || t == "all" {
+		se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4, webrtc.NetworkTypeTCP4})
+		se.DisableActiveTCP(false)
+	}
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(se))
 	pc, err := api.NewPeerConnection(webrtc.Configuration{
@@ -614,11 +683,12 @@ func (e *BridgeEngine) connectAndStream(host, stream string) bool {
 
 	pc.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		addLog(fmt.Sprintf("[%s] ICE Connection State: %s", stream, connectionState.String()))
-		if connectionState == webrtc.ICEConnectionStateDisconnected ||
-			connectionState == webrtc.ICEConnectionStateFailed ||
+		if connectionState == webrtc.ICEConnectionStateFailed ||
 			connectionState == webrtc.ICEConnectionStateClosed {
-			addLog(fmt.Sprintf("⚠️ Stream '%s' interrupted (network drop or orientation switch). Fast reconnecting...", stream))
+			addLog(fmt.Sprintf("⚠️ Stream '%s' connection failed. Fast reconnecting...", stream))
 			_ = pc.Close()
+		} else if connectionState == webrtc.ICEConnectionStateDisconnected {
+			addLog(fmt.Sprintf("⚠️ Stream '%s' transient ICE disconnect (re-evaluating candidates)...", stream))
 		}
 	})
 
@@ -665,6 +735,8 @@ func (e *BridgeEngine) connectAndStream(host, stream string) bool {
 			e.activeSSRC = uint32(track.SSRC())
 			e.Unlock()
 			go e.handleVideoTrack(track, pc, doneChan)
+		} else if track.Kind() == webrtc.RTPCodecTypeAudio {
+			go e.handleAudioTrack(track)
 		}
 	})
 
@@ -738,6 +810,84 @@ func (e *BridgeEngine) connectAndStream(host, stream string) bool {
 	return true
 }
 
+// rtpHealth tracks RTP loss, jitter (RFC 3550) and throughput from the raw stream,
+// since Pion v3 GetStats() exposes neither.
+type rtpHealth struct {
+	mu         sync.Mutex
+	baseSeq    int64
+	highestSeq int64
+	received   int64
+	bytes      int64
+	haveBase   bool
+	jitter     float64
+	lastRTP    uint32
+	lastArr    time.Time
+	haveTiming bool
+}
+
+func (h *rtpHealth) observe(seq uint16, rtpTime uint32, size int, clockRate float64, arr time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	s := int64(seq)
+	if !h.haveBase {
+		h.baseSeq = s
+		h.highestSeq = s
+		h.haveBase = true
+	} else {
+		for s < h.highestSeq-32768 {
+			s += 65536
+		}
+		for s > h.highestSeq+32768 {
+			s -= 65536
+		}
+		if s > h.highestSeq {
+			h.highestSeq = s
+		}
+	}
+	h.received++
+	h.bytes += int64(size)
+
+	if clockRate > 0 {
+		if h.haveTiming {
+			arrivalDiff := arr.Sub(h.lastArr).Seconds() * clockRate
+			rtpDiff := float64(int32(rtpTime - h.lastRTP))
+			d := arrivalDiff - rtpDiff
+			if d < 0 {
+				d = -d
+			}
+			h.jitter += (d - h.jitter) / 16.0
+		} else {
+			h.haveTiming = true
+		}
+		h.lastRTP = rtpTime
+		h.lastArr = arr
+	}
+}
+
+// snapshot returns cumulative received, lost, loss %, jitter (ms) and bytes.
+func (h *rtpHealth) snapshot(clockRate float64) (received, lost int64, lossPct, jitterMs float64, bytes int64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	received = h.received
+	bytes = h.bytes
+	if h.haveBase {
+		expected := h.highestSeq - h.baseSeq + 1
+		lost = expected - h.received
+		if lost < 0 {
+			lost = 0
+		}
+		if expected > 0 {
+			lossPct = float64(lost) / float64(expected) * 100
+		}
+	}
+	if clockRate > 0 {
+		jitterMs = h.jitter / clockRate * 1000.0
+	}
+	return
+}
+
 func (e *BridgeEngine) handleVideoTrack(track *webrtc.TrackRemote, pc *webrtc.PeerConnection, doneChan chan struct{}) {
 	stream := e.streamName
 	defer func() {
@@ -746,6 +896,10 @@ func (e *BridgeEngine) handleVideoTrack(track *webrtc.TrackRemote, pc *webrtc.Pe
 		}
 		close(doneChan)
 	}()
+	// Closed when this track ends, so the per-track helper goroutines stop on reconnect
+	// instead of leaking (e.running stays true across reconnects).
+	trackDone := make(chan struct{})
+	defer close(trackDone)
 	mime := track.Codec().MimeType
 	isH264 := strings.EqualFold(mime, webrtc.MimeTypeH264)
 	addLog(fmt.Sprintf("⚡ [%s] Starting %s Video Decoder & NDI Pipeline... (SSRC: %d)", stream, mime, track.SSRC()))
@@ -756,47 +910,188 @@ func (e *BridgeEngine) handleVideoTrack(track *webrtc.TrackRemote, pc *webrtc.Pe
 		return
 	}
 	defer decoder.Close()
-
-	// Send periodic PLI keyframe requests on startup to force immediate I-Frame from sender
-	go func() {
-		for i := 0; i < 10; i++ {
-			_ = pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}})
-			time.Sleep(300 * time.Millisecond)
-		}
-	}()
+	addLog(fmt.Sprintf("⚙️ [%s] %s video decoder ready — acceleration: %s", stream, mime, decoder.HWDeviceName()))
 
 	var builder *samplebuilder.SampleBuilder
 	if isH264 {
-		builder = samplebuilder.New(50, &codecs.H264Packet{}, track.Codec().ClockRate)
+		builder = samplebuilder.New(500, &codecs.H264Packet{}, track.Codec().ClockRate)
 	} else {
-		builder = samplebuilder.New(50, &codecs.VP8Packet{}, track.Codec().ClockRate)
+		builder = samplebuilder.New(500, &codecs.VP8Packet{}, track.Codec().ClockRate)
 	}
 
 	var totalFrames int64
 	var framesInSecond int64
-	gotKeyframe := false
+	var droppedFrames int64
+	var pipelineNanos int64
+	health := &rtpHealth{}
+	lastPLI := time.Time{}
+	// Rate-limited keyframe request: a missing / undecodable I-Frame must not trigger a PLI storm.
+	requestKeyframe := func() {
+		if time.Since(lastPLI) < 250*time.Millisecond {
+			return
+		}
+		lastPLI = time.Now()
+		_ = pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}})
+	}
+	// Ask for an initial keyframe before the decode worker starts (avoids a data race on lastPLI).
+	requestKeyframe()
+
+	// Decoding runs on its own goroutine so a slow decoder can never stall the RTP
+	// read loop. Stalling that loop backs up the ICE/DTLS socket and drops the connection.
+	frameChan := make(chan []byte, 64)
+	var decodeWG sync.WaitGroup
+	decodeWG.Add(1)
+	go func() {
+		defer decodeWG.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				addLog(fmt.Sprintf("⚠️ [%s] Recovered from video decoder pipeline panic: %v", stream, r))
+			}
+		}()
+
+		gotKeyframe := false
+		for frameData := range frameChan {
+			if len(frameData) == 0 {
+				continue
+			}
+
+			var isKeyframe bool
+			if isH264 {
+				isKeyframe = isH264Keyframe(frameData)
+			} else {
+				isKeyframe = (frameData[0] & 0x01) == 0
+			}
+
+			if !gotKeyframe {
+				if !isKeyframe {
+					requestKeyframe()
+					continue
+				}
+				gotKeyframe = true
+			}
+
+			tFrame := time.Now()
+			w, h, bgraSlice, stride, err := decoder.Decode(frameData)
+			if err != nil || w <= 0 || h <= 0 || len(bgraSlice) == 0 {
+				gotKeyframe = false
+				requestKeyframe()
+				continue
+			}
+
+			e.Lock()
+			ndiBridge := e.ndi
+			e.Unlock()
+
+			if ndiBridge != nil {
+				ndiBridge.SendVideo(w, h, bgraSlice, stride)
+				atomic.AddInt64(&pipelineNanos, time.Since(tFrame).Nanoseconds())
+				frameCount := atomic.AddInt64(&totalFrames, 1)
+				atomic.AddInt64(&framesInSecond, 1)
+
+				if isKeyframe {
+					addVerboseLog(fmt.Sprintf("🔑 [%s] Synchronized %s Keyframe! Resolution: %dx%d", stream, mime, w, h))
+					appState.Lock()
+					if st, ok := appState.Streams[stream]; ok {
+						st.Resolution = fmt.Sprintf("%dx%d", w, h)
+					}
+					appState.Unlock()
+				}
+				if frameCount%120 == 0 || frameCount == 1 {
+					addVerboseLog(fmt.Sprintf("🎥 [%s] Rendered %d live video frames to NDI (%dx%d)", stream, frameCount, w, h))
+				}
+			}
+		}
+	}()
 
 	// Stats reporting ticker per stream
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	go func() {
-		for range ticker.C {
-			e.Lock()
-			running := e.running
-			e.Unlock()
-			if !running {
+		var lastOut int64
+		for {
+			select {
+			case <-trackDone:
 				return
+			case <-ticker.C:
+				atomic.SwapInt64(&framesInSecond, 0) // keep decode counter drained
+				e.Lock()
+				ndi := e.ndi
+				e.Unlock()
+				outFPS := 0
+				if ndi != nil {
+					of := ndi.OutFrames()
+					outFPS = int(of - lastOut)
+					lastOut = of
+				}
+				appState.Lock()
+				if st, ok := appState.Streams[stream]; ok {
+					st.FPS = outFPS // real NDI output rate (steady), not decode throughput
+					st.FrameCount = atomic.LoadInt64(&totalFrames)
+				}
+				appState.Unlock()
 			}
-			currentFPS := atomic.SwapInt64(&framesInSecond, 0)
-			appState.Lock()
-			if st, ok := appState.Streams[stream]; ok {
-				st.FPS = int(currentFPS)
-				st.FrameCount = atomic.LoadInt64(&totalFrames)
-			}
-			appState.Unlock()
 		}
 	}()
 
+	// Periodic network-health stats (loss / jitter / RTT / bitrate) for chasing instability.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		clockRate := float64(track.Codec().ClockRate)
+		var lastBytes int64
+		var lastTime time.Time
+		var lastDecoded int64
+		var lastPipeNanos int64
+		for {
+			select {
+			case <-trackDone:
+				return
+			case <-ticker.C:
+			}
+
+			received, lost, lossPct, jitterMs, bytes := health.snapshot(clockRate)
+
+			now := time.Now()
+			kbps := 0.0
+			if !lastTime.IsZero() {
+				if dt := now.Sub(lastTime).Seconds(); dt > 0 {
+					kbps = float64(bytes-lastBytes) * 8 / 1000.0 / dt
+				}
+			}
+			lastBytes = bytes
+			lastTime = now
+
+			decoded := atomic.LoadInt64(&totalFrames)
+			pipeNanos := atomic.LoadInt64(&pipelineNanos)
+			avgPipeMs := 0.0
+			if decoded > lastDecoded {
+				avgPipeMs = float64(pipeNanos-lastPipeNanos) / float64(decoded-lastDecoded) / 1e6
+			}
+			lastDecoded = decoded
+			lastPipeNanos = pipeNanos
+
+			rttMs := -1.0
+			for _, s := range pc.GetStats() {
+				var cp *webrtc.ICECandidatePairStats
+				switch v := s.(type) {
+				case webrtc.ICECandidatePairStats:
+					c := v
+					cp = &c
+				case *webrtc.ICECandidatePairStats:
+					cp = v
+				}
+				if cp != nil && cp.Nominated && cp.State == webrtc.StatsICECandidatePairStateSucceeded {
+					rttMs = cp.CurrentRoundTripTime * 1000
+				}
+			}
+
+			addLog(fmt.Sprintf("📊 [%s] net %.0f kbps | loss %d/%d (%.2f%%) | jitter %.1f ms | RTT %.0f ms | decoded %d | drops %d | pipe %.1f ms",
+				stream, kbps, lost, received+lost, lossPct, jitterMs, rttMs,
+				decoded, atomic.LoadInt64(&droppedFrames), avgPipeMs))
+		}
+	}()
+
+	// RTP read loop: stays lightweight and never blocks on decode/NDI.
 	for {
 		e.Lock()
 		running := e.running
@@ -811,6 +1106,8 @@ func (e *BridgeEngine) handleVideoTrack(track *webrtc.TrackRemote, pc *webrtc.Pe
 			break
 		}
 
+		health.observe(pkt.SequenceNumber, pkt.Timestamp, len(pkt.Payload), float64(track.Codec().ClockRate), time.Now())
+
 		builder.Push(pkt)
 
 		for {
@@ -818,31 +1115,67 @@ func (e *BridgeEngine) handleVideoTrack(track *webrtc.TrackRemote, pc *webrtc.Pe
 			if sample == nil {
 				break
 			}
+			if len(sample.Data) == 0 {
+				continue
+			}
+			select {
+			case frameChan <- sample.Data:
+			default:
+				// Decoder is behind: drop this frame instead of stalling RTP intake.
+				atomic.AddInt64(&droppedFrames, 1)
+			}
+		}
+	}
 
-			frameData := sample.Data
-			if len(frameData) == 0 {
+	close(frameChan)
+	decodeWG.Wait()
+}
+
+func (e *BridgeEngine) handleAudioTrack(track *webrtc.TrackRemote) {
+	stream := e.streamName
+	defer func() {
+		if r := recover(); r != nil {
+			addLog(fmt.Sprintf("⚠️ [%s] Recovered from audio decoder pipeline panic: %v", stream, r))
+		}
+	}()
+	mime := track.Codec().MimeType
+	addLog(fmt.Sprintf("🔊 [%s] Starting %s Opus Audio Receiver & NDI Audio Pipeline... (SSRC: %d)", stream, mime, track.SSRC()))
+
+	audioDec, err := NewAudioDecoder()
+	if err != nil {
+		addLog(fmt.Sprintf("[%s] WARNING: Opus Audio Decoder init failed: %v", stream, err))
+		return
+	}
+	defer audioDec.Close()
+
+	builder := samplebuilder.New(200, &codecs.OpusPacket{}, track.Codec().ClockRate)
+
+	for {
+		e.Lock()
+		running := e.running
+		e.Unlock()
+		if !running {
+			break
+		}
+
+		pkt, _, err := track.ReadRTP()
+		if err != nil {
+			break
+		}
+
+		builder.Push(pkt)
+
+		for {
+			sample := builder.Pop()
+			if sample == nil {
+				break
+			}
+			if len(sample.Data) == 0 {
 				continue
 			}
 
-			var isKeyframe bool
-			if isH264 {
-				isKeyframe = isH264Keyframe(frameData)
-			} else {
-				isKeyframe = (frameData[0] & 0x01) == 0
-			}
-
-			if !gotKeyframe {
-				if !isKeyframe {
-					_ = pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}})
-					continue
-				}
-				gotKeyframe = true
-			}
-
-			w, h, bgraSlice, stride, err := decoder.Decode(frameData)
-			if err != nil || w <= 0 || h <= 0 || len(bgraSlice) == 0 {
-				gotKeyframe = false
-				_ = pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}})
+			sampleRate, channels, numSamples, floatBuf, err := audioDec.Decode(sample.Data)
+			if err != nil || numSamples <= 0 || len(floatBuf) == 0 {
 				continue
 			}
 
@@ -851,21 +1184,7 @@ func (e *BridgeEngine) handleVideoTrack(track *webrtc.TrackRemote, pc *webrtc.Pe
 			e.Unlock()
 
 			if ndiBridge != nil {
-				ndiBridge.SendVideo(w, h, bgraSlice, stride)
-				frameCount := atomic.AddInt64(&totalFrames, 1)
-				atomic.AddInt64(&framesInSecond, 1)
-
-				if isKeyframe {
-					addVerboseLog(fmt.Sprintf("🔑 [%s] Synchronized VP8 Keyframe! Resolution: %dx%d", stream, w, h))
-					appState.Lock()
-					if st, ok := appState.Streams[stream]; ok {
-						st.Resolution = fmt.Sprintf("%dx%d", w, h)
-					}
-					appState.Unlock()
-				}
-				if frameCount%120 == 0 || frameCount == 1 {
-					addVerboseLog(fmt.Sprintf("🎥 [%s] Hardware Rendered %d live video frames to NDI (%dx%d)", stream, frameCount, w, h))
-				}
+				ndiBridge.SendAudio(sampleRate, channels, numSamples, floatBuf)
 			}
 		}
 	}
@@ -999,12 +1318,28 @@ const htmlPage = `<!DOCTYPE html>
         <div class="card">
             <h1>StationCast Multi-Stream NDI Bridge <span class="badge">Go Edition</span></h1>
             
-            <div style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 16px;">
-                <div style="flex: 1;">
+            <div style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 16px; flex-wrap: wrap;">
+                <div style="flex: 1 1 200px; min-width: 180px;">
                     <label>OvenMediaEngine Host IP</label>
-                    <input type="text" id="host" value="75.119.149.43">
+                    <input type="text" id="host" value="158.220.126.145">
                 </div>
-                <button class="btn-start" style="flex: 0 0 160px; height: 36px;" onclick="updateHost()">Update Host IP</button>
+                <div style="flex: 0 1 210px; min-width: 180px;">
+                    <label>WebRTC Media Transport</label>
+                    <select id="transport" style="width:100%; box-sizing:border-box; padding:8px 10px; border-radius:6px; border:1px solid #475569; background:#0f172a; color:white; font-size:13px;">
+                        <option value="">UDP + TCP (default)</option>
+                        <option value="tcp">TCP only (Direct ICE, RFC 6544)</option>
+                        <option value="udp">UDP only</option>
+                        <option value="relay">TURN relay (TCP)</option>
+                        <option value="all">UDP → TCP → Relay (fallback)</option>
+                    </select>
+                </div>
+                <div style="flex: 0 1 180px; min-width: 150px;">
+                    <label>NDI Playout Buffer (frames)</label>
+                    <input type="number" id="playout_frames" min="1" max="24" step="1" value="6">
+                </div>
+                <button class="btn-start" style="flex: 0 0 150px; height: 36px;" onclick="updateHost()">Update Host IP</button>
+                <button class="btn-start" style="flex: 0 0 150px; height: 36px; background:#0d9488;" onclick="updateTransport()">Apply Transport</button>
+                <button class="btn-start" style="flex: 0 0 150px; height: 36px; background:#0d9488;" onclick="updatePlayout()">Apply Buffer</button>
             </div>
 
             <div class="checkbox-group">
@@ -1057,7 +1392,9 @@ const htmlPage = `<!DOCTYPE html>
             try {
                 const res = await fetch('/api/state');
                 const data = await res.json();
-                document.getElementById('host').value = data.host || '75.119.149.43';
+                document.getElementById('host').value = data.host || '158.220.126.145';
+                document.getElementById('transport').value = data.transport || '';
+                document.getElementById('playout_frames').value = data.playout_frames || 6;
                 document.getElementById('enable_logs').checked = data.enable_logs;
                 document.getElementById('verbose_logs').checked = data.verbose_logs;
                 
@@ -1103,6 +1440,14 @@ const htmlPage = `<!DOCTYPE html>
         async function updateHost() {
             const host = document.getElementById('host').value;
             await fetch('/api/update_host', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host }) });
+        }
+        async function updateTransport() {
+            const transport = document.getElementById('transport').value;
+            await fetch('/api/update_transport', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transport }) });
+        }
+        async function updatePlayout() {
+            const playout_frames = parseInt(document.getElementById('playout_frames').value, 10) || 6;
+            await fetch('/api/update_playout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playout_frames }) });
         }
         async function startAllStreams() {
             await fetch('/api/start_all', { method: 'POST' });
@@ -1181,6 +1526,56 @@ func main() {
 			appState.Unlock()
 			saveConfig()
 		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	http.HandleFunc("/api/update_transport", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		t := strings.ToLower(strings.TrimSpace(body["transport"]))
+		if t == "udptcp" || t == "default" {
+			t = ""
+		}
+		switch t {
+		case "", "udp", "tcp", "relay", "all":
+			appState.Lock()
+			appState.Transport = t
+			appState.Unlock()
+			saveConfig()
+			// Transport is baked into the ICE setup at connect time, so restart streams to apply it.
+			engineManager.StopAll()
+			engineManager.StartAll()
+			label := t
+			if label == "" {
+				label = "default (UDP+TCP)"
+			}
+			addLog(fmt.Sprintf("🔀 WebRTC media transport set to '%s' — restarting streams", label))
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.Error(w, "invalid transport (use '', udp, tcp, relay, all)", http.StatusBadRequest)
+		}
+	})
+
+	http.HandleFunc("/api/update_playout", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		v, ok := body["playout_frames"].(float64)
+		if !ok {
+			http.Error(w, "missing playout_frames", http.StatusBadRequest)
+			return
+		}
+		n := int(v)
+		if n < 1 {
+			n = 1
+		}
+		if n > 24 {
+			n = 24
+		}
+		appState.Lock()
+		appState.PlayoutFrames = n
+		appState.Unlock()
+		saveConfig()
+		addLog(fmt.Sprintf("🎛️ NDI playout buffer set to %d frames (~%d ms latency) — applies live", n, n*33))
 		w.WriteHeader(http.StatusOK)
 	})
 

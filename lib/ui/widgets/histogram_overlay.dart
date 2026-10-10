@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -12,16 +14,22 @@ class HistogramOverlay extends ConsumerStatefulWidget {
 
 class _HistogramOverlayState extends ConsumerState<HistogramOverlay> {
   List<int> _bins = List.filled(256, 0);
-  Stream<List<int>>? _histogramStream;
+  StreamSubscription<List<int>>? _sub;
 
   @override
   void initState() {
     super.initState();
-    final plugin = ref.read(broadcastPluginProvider);
-    _histogramStream = plugin.histogram;
-    _histogramStream!.listen((bins) {
+    _sub = ref.read(broadcastPluginProvider).histogram.listen((bins) {
       if (mounted) setState(() => _bins = bins);
     });
+  }
+
+  @override
+  void dispose() {
+    // Cancel so the native histogram loop (PixelCopy + 256-bin scan) stops when
+    // the overlay is hidden; otherwise it kept burning CPU in the background.
+    _sub?.cancel();
+    super.dispose();
   }
 
   @override

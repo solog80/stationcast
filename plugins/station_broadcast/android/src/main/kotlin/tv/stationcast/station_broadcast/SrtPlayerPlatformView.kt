@@ -15,6 +15,7 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.extractor.Extractor
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.ts.TsExtractor
@@ -39,6 +40,7 @@ class SrtPlayerPlatformView(
     context: Context,
     id: Int,
     url: String,
+    maxHeight: Int,
     messenger: BinaryMessenger,
 ) : PlatformView, Player.Listener, MethodChannel.MethodCallHandler {
 
@@ -46,9 +48,15 @@ class SrtPlayerPlatformView(
     private val player: ExoPlayer
 
     init {
-        Log.i("SrtPlatform", "PlatformView init, url: $url")
+        Log.i("SrtPlatform", "PlatformView init, url: $url, maxHeight: $maxHeight")
         try {
-            player = ExoPlayer.Builder(context).build()
+            val trackSelector = DefaultTrackSelector(context)
+            if (maxHeight > 0) {
+                trackSelector.parameters = trackSelector.parameters.buildUpon()
+                    .setMaxVideoSize(Int.MAX_VALUE, maxHeight)
+                    .build()
+            }
+            player = ExoPlayer.Builder(context).setTrackSelector(trackSelector).build()
             player.addListener(this)
             Log.i("SrtPlatform", "ExoPlayer created")
         } catch (e: Exception) {
@@ -129,7 +137,8 @@ class SrtPlayerViewFactory(
         @Suppress("UNCHECKED_CAST")
         val params = args as? Map<String, Any?>
         val url = params?.get("url") as? String ?: ""
-        return SrtPlayerPlatformView(context, viewId, url, messenger)
+        val maxHeight = (params?.get("maxHeight") as? Number)?.toInt() ?: 0
+        return SrtPlayerPlatformView(context, viewId, url, maxHeight, messenger)
     }
 }
 

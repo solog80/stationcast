@@ -7,7 +7,7 @@ import '../../models/camera_settings.dart';
 import '../../theme/control_room_theme.dart';
 import '../../utils/log.dart';
 
-enum _ControlType { wb, iso, ev, focus, flash, eis }
+enum _ControlType { wb, ev, focus, flash, eis }
 
 class CameraControlsStrip extends ConsumerStatefulWidget {
   const CameraControlsStrip({super.key});
@@ -37,12 +37,6 @@ class _CameraControlsStripState extends ConsumerState<CameraControlsStrip> {
         icon: Icons.light_mode,
         label: _wbLabel(camera.whiteBalance),
         active: camera.whiteBalance != WhiteBalanceMode.auto,
-      ),
-      _ControlItem(
-        type: _ControlType.iso,
-        icon: Icons.invert_colors,
-        label: 'ISO${camera.isoSensitivity}',
-        active: camera.isoSensitivity != 100,
       ),
       _ControlItem(
         type: _ControlType.ev,
@@ -130,37 +124,40 @@ class _CameraControlsStripState extends ConsumerState<CameraControlsStrip> {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: GestureDetector(
         onTap: () => _handleTap(camera, item),
-        child: Container(
-          width: 48,
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          decoration: BoxDecoration(
-            color: isExpanded
-                ? ControlRoomColors.amber.withValues(alpha: 0.3)
-                : item.active
-                ? ControlRoomColors.amber.withValues(alpha: 0.15)
-                : null,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Column(
-            children: [
-              Icon(
-                item.icon,
-                size: 22,
-                color: isExpanded || item.active
-                    ? ControlRoomColors.amber
-                    : Colors.white54,
-              ),
-              const SizedBox(height: 3),
-              Text(
-                item.label,
-                style: TextStyle(
-                  fontSize: 8,
+        child: Opacity(
+          opacity: item.disabled ? 0.35 : 1.0,
+          child: Container(
+            width: 48,
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: isExpanded
+                  ? ControlRoomColors.amber.withValues(alpha: 0.3)
+                  : item.active
+                  ? ControlRoomColors.amber.withValues(alpha: 0.15)
+                  : null,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: [
+                Icon(
+                  item.icon,
+                  size: 22,
                   color: isExpanded || item.active
                       ? ControlRoomColors.amber
                       : Colors.white54,
                 ),
-              ),
-            ],
+                const SizedBox(height: 3),
+                Text(
+                  item.label,
+                  style: TextStyle(
+                    fontSize: 8,
+                    color: isExpanded || item.active
+                        ? ControlRoomColors.amber
+                        : Colors.white54,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -197,19 +194,6 @@ class _CameraControlsStripState extends ConsumerState<CameraControlsStrip> {
                 selected: camera.whiteBalance == m,
                 onTap: () {
                   notifier.save(camera.copyWith(whiteBalance: m));
-                  setState(() => _expanded = null);
-                },
-              ),
-            )
-            .toList();
-      case _ControlType.iso:
-        return [100, 200, 400, 800, 1600, 3200]
-            .map(
-              (v) => _numOption(
-                label: '$v',
-                selected: camera.isoSensitivity == v,
-                onTap: () {
-                  notifier.save(camera.copyWith(isoSensitivity: v));
                   setState(() => _expanded = null);
                 },
               ),
@@ -407,11 +391,13 @@ class _ControlItem {
   final String label;
   final bool active;
   final bool isToggle;
+  final bool disabled;
   const _ControlItem({
     required this.type,
     required this.icon,
     required this.label,
     required this.active,
     this.isToggle = false,
+    this.disabled = false,
   });
 }

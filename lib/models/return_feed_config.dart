@@ -12,6 +12,7 @@ class ReturnFeedConfig {
     this.startMuted = true,
     this.srtPassphrase = 'ffeMUNNYO11',
     this.srtSenderMode = SrtSenderMode.caller,
+    this.maxHeight = 0,
     this.talkbackEnabled = false,
     this.talkbackUrl = '',
     this.talkbackLatencyMs = 500,
@@ -27,6 +28,10 @@ class ReturnFeedConfig {
   final bool startMuted;
   final String srtPassphrase;
   final SrtSenderMode srtSenderMode;
+
+  /// Cap the return-feed video resolution (max height in px). 0 = full/auto.
+  /// Lower = less decode/render work (cooler) when the source offers renditions.
+  final int maxHeight;
 
   // Talkback (audio intercom)
   final bool talkbackEnabled;
@@ -46,6 +51,7 @@ class ReturnFeedConfig {
     bool? startMuted,
     String? srtPassphrase,
     SrtSenderMode? srtSenderMode,
+    int? maxHeight,
     bool? talkbackEnabled,
     String? talkbackUrl,
     int? talkbackLatencyMs,
@@ -61,6 +67,7 @@ class ReturnFeedConfig {
         startMuted: startMuted ?? this.startMuted,
         srtPassphrase: srtPassphrase ?? this.srtPassphrase,
         srtSenderMode: srtSenderMode ?? this.srtSenderMode,
+        maxHeight: maxHeight ?? this.maxHeight,
         talkbackEnabled: talkbackEnabled ?? this.talkbackEnabled,
         talkbackUrl: talkbackUrl ?? this.talkbackUrl,
         talkbackLatencyMs: talkbackLatencyMs ?? this.talkbackLatencyMs,
@@ -77,6 +84,7 @@ class ReturnFeedConfig {
         'startMuted': startMuted,
         'srtPassphrase': srtPassphrase,
         'srtSenderMode': srtSenderMode.name,
+        'maxHeight': maxHeight,
         'talkbackEnabled': talkbackEnabled,
         'talkbackUrl': talkbackUrl,
         'talkbackLatencyMs': talkbackLatencyMs,
@@ -99,6 +107,7 @@ class ReturnFeedConfig {
           (m) => m.name == json['srtSenderMode'],
           orElse: () => SrtSenderMode.caller,
         ),
+        maxHeight: (json['maxHeight'] as num?)?.toInt() ?? 0,
         talkbackEnabled: json['talkbackEnabled'] as bool? ?? false,
         talkbackUrl: json['talkbackUrl'] as String? ?? '',
         talkbackLatencyMs: (json['talkbackLatencyMs'] as num?)?.toInt() ?? 500,

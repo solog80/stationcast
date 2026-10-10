@@ -35,10 +35,31 @@ class _OnAirIndicatorState extends State<OnAirIndicator>
       vsync: this,
       duration: const Duration(milliseconds: 700),
       lowerBound: 0.35,
-    )..repeat(reverse: true);
+    );
+    _syncPulse();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      // Only rebuild while an elapsed-time counter is shown.
       if (widget.liveSince != null && mounted) setState(() {});
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant OnAirIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.connection != widget.connection) _syncPulse();
+  }
+
+  /// Runs the pulse animation only while connecting/reconnecting. Keeps the
+  /// vsync ticker off during steady LIVE streaming (less GPU/CPU churn = less heat).
+  void _syncPulse() {
+    final pulsing =
+        widget.connection == BroadcastConnectionState.connecting ||
+        widget.connection == BroadcastConnectionState.reconnecting;
+    if (pulsing) {
+      if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
+    } else if (_pulse.isAnimating) {
+      _pulse.stop();
+    }
   }
 
   @override

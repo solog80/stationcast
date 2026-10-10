@@ -45,7 +45,9 @@ Designed for live television broadcasts, remote field reporting, and multi-camer
 
 ```json
 {
-  "host": "75.119.149.43",
+  "host": "158.220.126.145",
+  "transport": "tcp",
+  "playout_frames": 6,
   "streams": [
     {
       "stream": "field1",
@@ -66,6 +68,8 @@ Designed for live television broadcasts, remote field reporting, and multi-camer
 | Field | Description | Default |
 |---|---|---|
 | `host` | OvenMediaEngine server IP address | `75.119.149.43` |
+| `transport` | WebRTC media transport (`""` = OME default UDP+TCP, `udp`, `tcp` = Direct TCP ICE (RFC 6544), `relay` = TURN, `all`). **Use `tcp` on lossy/hostile networks** (e.g. long-haul links) — it eliminates UDP packet loss at the cost of some latency. | `""` |
+| `playout_frames` | NDI output jitter buffer depth in frames (~33 ms each). Higher = smoother on lossy/long links (absorbs TCP stalls/bursts) at the cost of added latency. Adjustable live from the dashboard. | `6` |
 | `streams` | Array of contributor stream channel objects | `[ field1, field2 ]` |
 | `stream` | Stream key name published on OME | `field1` |
 | `ndi_name` | Published NDI output source name on local network | `Field_1_StationCast` |
@@ -105,14 +109,20 @@ go build -v -o StationCast_NDI_Bridge .
 ```
 
 #### Cross-Compile / Build for Windows 64-bit
-Run the included build script:
+Prerequisites (one-time):
+```bash
+brew install mingw-w64              # MinGW C cross-compiler (CGO)
+./setup_ffmpeg_win64_static.sh      # Builds minimal static FFmpeg into third_party/
+```
+Then build:
 ```bash
 ./build_win.sh
 ```
-Or execute manual cross-compilation command:
-```bash
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -v -ldflags="-s -w -H windowsgui" -o StationCast_NDI_Bridge.exe .
-```
+
+This cross-compiles with `CGO_ENABLED=1` and **statically links** a minimal FFmpeg
+(H.264 + Opus decoders, with DXVA2/D3D11VA GPU decode), so Windows uses the same
+H.264 decode path as macOS. The result is a single, self-contained
+`StationCast_NDI_Bridge.exe` — **no DLLs to copy around**.
 
 ---
 
@@ -125,4 +135,6 @@ Double click `StationCast NDI Bridge.app` or run via CLI:
 ```
 
 #### Windows
-Double click `StationCast_NDI_Bridge.exe`. It launches cleanly into the system tray without popping up a console window. Access options and status via the system tray menu icon.
+Double click `StationCast_NDI_Bridge.exe`. It is fully self-contained (no DLLs
+required) and launches cleanly into the system tray without popping up a console
+window. Access options and status via the system tray menu icon.

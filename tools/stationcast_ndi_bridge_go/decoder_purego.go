@@ -1,4 +1,4 @@
-//go:build !cgo || windows
+//go:build !cgo
 
 package main
 
@@ -84,6 +84,22 @@ func (d *PureGoVP8Decoder) Decode(payload []byte) (int, int, []byte, int, error)
 }
 
 func (d *PureGoVP8Decoder) Close() {}
+
+func (d *PureGoVP8Decoder) HWDeviceName() string {
+	return "software (pure-Go VP8)"
+}
+
+type PureGoAudioDecoder struct{}
+
+func NewAudioDecoder() (AudioDecoder, error) {
+	return &PureGoAudioDecoder{}, nil
+}
+
+func (d *PureGoAudioDecoder) Decode(payload []byte) (int, int, int, []float32, error) {
+	return 0, 0, 0, nil, fmt.Errorf("purego audio decoding not implemented")
+}
+
+func (d *PureGoAudioDecoder) Close() {}
 
 func ycbcrToBGRAParallel(img *image.YCbCr, bgraBuf []byte) {
 	w := img.Rect.Dx()

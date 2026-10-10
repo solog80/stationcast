@@ -761,6 +761,27 @@ class _ReturnFeedSection extends ConsumerWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                const Text('Return feed resolution'),
+                DropdownButton<int>(
+                  value: const [0, 1080, 720, 480].contains(config.maxHeight)
+                      ? config.maxHeight
+                      : 0,
+                  items: const [
+                    DropdownMenuItem(value: 0, child: Text('Full')),
+                    DropdownMenuItem(value: 1080, child: Text('1080p')),
+                    DropdownMenuItem(value: 720, child: Text('720p')),
+                    DropdownMenuItem(value: 480, child: Text('480p')),
+                  ],
+                  onChanged: (h) => h == null
+                      ? null
+                      : notifier.save(config.copyWith(maxHeight: h)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
                 const Text('Player backend'),
                 DropdownButton<ReturnFeedBackend>(
                   value: config.backend,

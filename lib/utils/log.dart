@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
-/// Logging disabled globally to suppress all debug output.
-// void log(Object? message, {int? wrapWidth}) {}
-
-// Logging enabled globally
+/// Logging is a no-op in release builds (avoids logcat I/O churn / heat while
+/// streaming). Enabled in debug/profile.
 void log(Object? message, {int? wrapWidth}) {
-  debugPrint('$message', wrapWidth: wrapWidth);
+  if (kDebugMode) {
+    debugPrint('$message', wrapWidth: wrapWidth);
+  }
 }

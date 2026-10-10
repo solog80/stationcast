@@ -16,6 +16,7 @@ abstract class ReturnFeedPlayer {
     bool muted = true,
     String? srtPassphrase,
     SrtSenderMode srtSenderMode = SrtSenderMode.caller,
+    int maxHeight = 0,
   });
 
   Future<void> stop();

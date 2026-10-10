@@ -60,5 +60,7 @@ tools/stationcast_ndi_bridge_go/StationCast_NDI_Bridge
 tools/stationcast_ndi_bridge_go/StationCast_NDI_Bridge.exe
 tools/stationcast_ndi_bridge_go/*.app
 tools/stationcast_ndi_bridge_go/*.log
+tools/stationcast_ndi_bridge_go/third_party/
+tools/stationcast_ndi_bridge_go/*.dll
 
 

@@ -1,4 +1,4 @@
-//go:build windows && !cgo
+//go:build windows
 
 package main
 
@@ -43,15 +43,27 @@ type NDIlib_video_frame_v2_t struct {
 	timestamp            int64
 }
 
+type NDIlib_audio_frame_v2_t struct {
+	sample_rate             int32
+	no_channels             int32
+	no_samples              int32
+	timecode                int64
+	p_data                  *float32
+	channel_stride_in_bytes int32
+	p_metadata              *byte
+	timestamp               int64
+}
+
 type NDISender struct {
-	instance uintptr
-	dll      *syscall.LazyDLL
-	pInit    *syscall.LazyProc
-	pDestroy *syscall.LazyProc
-	pCreate  *syscall.LazyProc
-	pSDestroy *syscall.LazyProc
-	pSend    *syscall.LazyProc
-	mu       sync.Mutex
+	instance   uintptr
+	dll        *syscall.LazyDLL
+	pInit      *syscall.LazyProc
+	pDestroy   *syscall.LazyProc
+	pCreate    *syscall.LazyProc
+	pSDestroy  *syscall.LazyProc
+	pSend      *syscall.LazyProc
+	pSendAudio *syscall.LazyProc
+	mu         sync.Mutex
 }
 
 func findNDIDLL() (*syscall.LazyDLL, string) {
@@ -204,12 +216,13 @@ func NewNDISender(ndiName string) (*NDISender, error) {
 	addLog(fmt.Sprintf("✅ NDI Windows DLL loaded from: %s", loadedPath))
 
 	sender := &NDISender{
-		dll:       dll,
-		pInit:     dll.NewProc("NDIlib_initialize"),
-		pDestroy:  dll.NewProc("NDIlib_destroy"),
-		pCreate:   dll.NewProc("NDIlib_send_create"),
-		pSDestroy: dll.NewProc("NDIlib_send_destroy"),
-		pSend:     dll.NewProc("NDIlib_send_send_video_v2"),
+		dll:        dll,
+		pInit:      dll.NewProc("NDIlib_initialize"),
+		pDestroy:   dll.NewProc("NDIlib_destroy"),
+		pCreate:    dll.NewProc("NDIlib_send_create"),
+		pSDestroy:  dll.NewProc("NDIlib_send_destroy"),
+		pSend:      dll.NewProc("NDIlib_send_send_video_v2"),
+		pSendAudio: dll.NewProc("NDIlib_send_send_audio_v2"),
 	}
 
 	if err := sender.pInit.Find(); err != nil {
@@ -225,8 +238,8 @@ func NewNDISender(ndiName string) (*NDISender, error) {
 	createSettings := NDIlib_send_create_t{
 		p_ndi_name:  nameC,
 		p_groups:    nil,
-		clock_video: true,
-		clock_audio: true,
+		clock_video: false,
+		clock_audio: false,
 	}
 
 	inst, _, _ := sender.pCreate.Call(uintptr(unsafe.Pointer(&createSettings)))
@@ -259,12 +272,44 @@ func (s *NDISender) SendVideo(w, h int, data []byte, stride int) {
 	s.pSend.Call(s.instance, uintptr(unsafe.Pointer(&frame)))
 }
 
+func (s *NDISender) SendAudio(sampleRate, channels, numSamples int, pcmFloat []float32) {
+	if s == nil || s.instance == 0 || len(pcmFloat) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	frame := NDIlib_audio_frame_v2_t{
+		sample_rate:             int32(sampleRate),
+		no_channels:             int32(channels),
+		no_samples:              int32(numSamples),
+		p_data:                  &pcmFloat[0],
+		channel_stride_in_bytes: int32(numSamples * 4),
+	}
+
+	if s.pSendAudio != nil && s.pSendAudio.Find() == nil {
+		s.pSendAudio.Call(s.instance, uintptr(unsafe.Pointer(&frame)))
+	}
+}
+
 func (s *NDISender) Close() {
 	if s != nil && s.instance != 0 {
 		s.pSDestroy.Call(s.instance)
 		s.instance = 0
 	}
 }
+
+// Playout buffer: decoded frames are queued and emitted in order at a steady rate,
+// so network stalls (e.g. TCP head-of-line blocking) and bursts render as smooth
+// motion instead of judder / ghosting.
+type playoutFrame struct {
+	bgra   []byte
+	width  int
+	height int
+	stride int
+}
+
+const playoutMaxFrames = 32 // hard cap, bounds latency and memory
 
 type NDIBridge struct {
 	sync.Mutex
@@ -275,6 +320,22 @@ type NDIBridge struct {
 	lastLiveFrameTime time.Time
 	stopStandby       chan struct{}
 	standbyImagePath  string
+	isLiveState       bool
+	lastLiveBGRA      []byte
+	lastLiveWidth     int
+	lastLiveHeight    int
+	lastLiveStride    int
+	playout           []playoutFrame
+	playoutStarted    bool
+	lastSent          playoutFrame
+	outFrames         int64
+}
+
+// OutFrames is the number of frames actually emitted to NDI (i.e. the real output rate source).
+func (b *NDIBridge) OutFrames() int64 {
+	b.Lock()
+	defer b.Unlock()
+	return b.outFrames
 }
 
 func NewNDIBridge(ndiName string, standbyPath string) (*NDIBridge, error) {
@@ -295,6 +356,16 @@ func NewNDIBridge(ndiName string, standbyPath string) (*NDIBridge, error) {
 	return b, nil
 }
 
+func (b *NDIBridge) SetLiveState(isLive bool) {
+	b.Lock()
+	defer b.Unlock()
+	b.isLiveState = isLive
+	if !isLive {
+		b.playout = nil
+		b.playoutStarted = false
+	}
+}
+
 func (b *NDIBridge) UpdateStandbyFrame(path string, w, h int) {
 	b.Lock()
 	defer b.Unlock()
@@ -313,18 +384,33 @@ func (b *NDIBridge) SendVideo(w, h int, bgra []byte, stride int) {
 	b.SendFrame(w, h, bgra, stride)
 }
 
+func (b *NDIBridge) SendAudio(sampleRate, channels, numSamples int, data []float32) {
+	b.Lock()
+	defer b.Unlock()
+
+	if b.sender != nil && len(data) > 0 {
+		b.sender.SendAudio(sampleRate, channels, numSamples, data)
+	}
+}
+
 func (b *NDIBridge) SendFrame(w, h int, bgra []byte, stride int) {
 	b.Lock()
 	defer b.Unlock()
 
-	if b.sender != nil && len(bgra) > 0 {
-		b.sender.SendVideo(w, h, bgra, stride)
-		b.lastLiveFrameTime = time.Now()
+	if b.sender == nil || len(bgra) == 0 {
+		return
 	}
+	b.isLiveState = true
+	// The decoder hands us a freshly-allocated frame, so queue it without copying.
+	b.playout = append(b.playout, playoutFrame{bgra: bgra, width: w, height: h, stride: stride})
+	if len(b.playout) > playoutMaxFrames {
+		b.playout = b.playout[1:] // drop oldest to bound latency
+	}
+	b.lastLiveFrameTime = time.Now()
 }
 
 func (b *NDIBridge) runStandbyLoop() {
-	ticker := time.NewTicker(33 * time.Millisecond)
+	ticker := time.NewTicker(33 * time.Millisecond) // ~30 FPS steady output
 	defer ticker.Stop()
 
 	for {
@@ -333,9 +419,24 @@ func (b *NDIBridge) runStandbyLoop() {
 			return
 		case <-ticker.C:
 			b.Lock()
-			timeSinceLive := time.Since(b.lastLiveFrameTime)
-			if timeSinceLive > 1500*time.Millisecond && len(b.standbyFrame) > 0 && b.sender != nil {
-				b.sender.SendVideo(b.standbyWidth, b.standbyHeight, b.standbyFrame, b.standbyWidth*4)
+			if b.sender != nil {
+				if b.isLiveState {
+					if (b.playoutStarted || len(b.playout) >= currentPlayoutFrames()) && len(b.playout) > 0 {
+						b.playoutStarted = true
+						f := b.playout[0]
+						b.playout = b.playout[1:]
+						b.lastSent = f
+						b.sender.SendVideo(f.width, f.height, f.bgra, f.stride)
+						b.outFrames++
+						b.lastLiveFrameTime = time.Now()
+					} else if len(b.lastSent.bgra) > 0 {
+						// Buffer underrun: hold the last frame (never color bars mid-broadcast)
+						b.sender.SendVideo(b.lastSent.width, b.lastSent.height, b.lastSent.bgra, b.lastSent.stride)
+					}
+				} else if len(b.standbyFrame) > 0 {
+					// Idle / broadcast ended: SMPTE color bars
+					b.sender.SendVideo(b.standbyWidth, b.standbyHeight, b.standbyFrame, b.standbyWidth*4)
+				}
 			}
 			b.Unlock()
 		}

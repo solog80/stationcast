@@ -21,11 +21,13 @@ import 'widgets/control_bar.dart';
 import 'widgets/frame_guides_overlay.dart';
 import 'widgets/histogram_overlay.dart';
 import 'widgets/floating_return_feed.dart';
-import 'widgets/health_overlay.dart';
 import 'widgets/on_air_indicator.dart';
 import 'widgets/talkback_indicator.dart';
 
 // Static camera instance created once and never recreated
+
+/// Last system-UI mode we applied, so we only hit the platform channel on change.
+SystemUiMode? _lastSystemUiMode;
 
 class BroadcastScreen extends ConsumerStatefulWidget {
   const BroadcastScreen({super.key, this.onSwitchToRadio});
@@ -137,12 +139,12 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
     _reportStatus(true, preset);
     _statusTimer?.cancel();
     _statusTimer = Timer.periodic(
-      const Duration(seconds: 5),
+      const Duration(seconds: 10),
       (_) => _reportStatus(true, preset),
     );
     _snapshotTimer?.cancel();
     _snapshotTimer = Timer.periodic(
-      const Duration(seconds: 10),
+      const Duration(seconds: 30),
       (_) => _takeSnapshot(),
     );
     final feedConfig = await ref.read(returnFeedConfigProvider.future);
@@ -279,12 +281,7 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final orientation = MediaQuery.of(context).orientation;
-    log('[BroadcastScreen] build: ${size.width}x${size.height} ($orientation)');
-
     final state = ref.watch(broadcastControllerProvider);
-    final stats = ref.watch(statsProvider).value;
     final feedState = ref.watch(returnFeedControllerProvider);
 
     // Auto-start/stop talkback when going live
@@ -339,7 +336,6 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
         onTap: _onScreenTap,
         child: _BroadcastLayout(
           state: state,
-          stats: stats,
           feedState: feedState,
           chromeVisible: _chromeVisible,
           oledDimmed: _oledDimmed,
@@ -357,7 +353,6 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
 
 class _BroadcastLayout extends ConsumerWidget {
   final BroadcastUiState state;
-  final StreamStats? stats;
   final ReturnFeedUiState feedState;
   final bool chromeVisible;
   final bool oledDimmed;
@@ -369,7 +364,6 @@ class _BroadcastLayout extends ConsumerWidget {
 
   const _BroadcastLayout({
     required this.state,
-    required this.stats,
     required this.feedState,
     required this.chromeVisible,
     required this.oledDimmed,
@@ -382,18 +376,18 @@ class _BroadcastLayout extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final size = MediaQuery.sizeOf(context);
     final orientation = MediaQuery.of(context).orientation;
-    log(
-      '[_BroadcastLayout] build: ${size.width}x${size.height} ($orientation)',
-    );
 
-    // Auto-hide system UI in landscape for immersive camera view
-    SystemChrome.setEnabledSystemUIMode(
-      orientation == Orientation.landscape
-          ? SystemUiMode.immersiveSticky
-          : SystemUiMode.edgeToEdge,
-    );
+    // Auto-hide system UI in landscape for immersive camera view.
+    // Only touch the platform channel when the mode actually changes (previously
+    // ran on every rebuild, i.e. ~20x/s from audio-level stats).
+    final uiMode = orientation == Orientation.landscape
+        ? SystemUiMode.immersiveSticky
+        : SystemUiMode.edgeToEdge;
+    if (_lastSystemUiMode != uiMode) {
+      _lastSystemUiMode = uiMode;
+      SystemChrome.setEnabledSystemUIMode(uiMode);
+    }
 
     return Stack(
       fit: StackFit.expand,
@@ -417,7 +411,6 @@ class _BroadcastLayout extends ConsumerWidget {
                   cameraSettingsOpen: cameraSettingsOpen,
                   onCameraSettingsToggle: onCameraSettingsToggle,
                   state: state,
-                  stats: stats,
                   feedState: feedState,
                   onGoLive: onGoLive,
                   onOpenSettings: onOpenSettings,
@@ -443,7 +436,6 @@ class _ChromeOverlay extends ConsumerWidget {
   final bool cameraSettingsOpen;
   final VoidCallback onCameraSettingsToggle;
   final BroadcastUiState state;
-  final StreamStats? stats;
   final ReturnFeedUiState feedState;
   final VoidCallback onGoLive;
   final VoidCallback onOpenSettings;
@@ -454,7 +446,6 @@ class _ChromeOverlay extends ConsumerWidget {
     required this.cameraSettingsOpen,
     required this.onCameraSettingsToggle,
     required this.state,
-    required this.stats,
     required this.feedState,
     required this.onGoLive,
     required this.onOpenSettings,
@@ -464,10 +455,6 @@ class _ChromeOverlay extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (!visible) return const SizedBox.shrink();
-
-    final isPortrait =
-        MediaQuery.of(context).orientation == Orientation.portrait;
-    log('[_ChromeOverlay] build: isPortrait=$isPortrait');
 
     return RepaintBoundary(
       child: SafeArea(
@@ -533,28 +520,7 @@ class _ChromeOverlay extends ConsumerWidget {
               // Metadata row — only when live, below controls
               if (state.isLive) ...[
                 const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (stats != null) ...[
-                      _MetaChip(
-                        icon: Icons.arrow_upward,
-                        label:
-                            '${(stats!.bitrateBps / 1000000).toStringAsFixed(1)} Mbps',
-                      ),
-                      const SizedBox(width: 8),
-                      _MetaChip(
-                        icon: Icons.speed,
-                        label: '${stats!.rttMs?.toStringAsFixed(0) ?? '?'} ms',
-                      ),
-                      const SizedBox(width: 8),
-                      _MetaChip(
-                        icon: Icons.warning_amber,
-                        label: '${stats!.packetsDropped} drop',
-                      ),
-                    ],
-                  ],
-                ),
+                const _StatsReadout(),
               ],
             ],
           ),
@@ -586,6 +552,55 @@ class _MetaChip extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Live numeric readout (bitrate / RTT / drops). Watches only those fields via
+/// select() so the fast audio-level stats don't rebuild it.
+class _StatsReadout extends ConsumerWidget {
+  const _StatsReadout();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final stat = ref.watch(
+      statsProvider.select((a) {
+        final s = a.valueOrNull;
+        if (s == null) return null;
+        return (s.bitrateBps, s.rttMs, s.packetsDropped);
+      }),
+    );
+    if (stat == null) return const SizedBox.shrink();
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _MetaChip(
+          icon: Icons.arrow_upward,
+          label: '${(stat.$1 / 1000000).toStringAsFixed(1)} Mbps',
+        ),
+        const SizedBox(width: 8),
+        _MetaChip(
+          icon: Icons.speed,
+          label: '${stat.$2.toStringAsFixed(0)} ms',
+        ),
+        const SizedBox(width: 8),
+        _MetaChip(icon: Icons.warning_amber, label: '${stat.$3} drop'),
+      ],
+    );
+  }
+}
+
+/// VU meter. Watches only the audio level so the fast (20 Hz) updates repaint a
+/// single small CustomPaint instead of the whole screen tree.
+class _AudioMeterFeed extends ConsumerWidget {
+  const _AudioMeterFeed();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final levels = ref.watch(
+      statsProvider.select((a) => a.valueOrNull?.audioLevelDb),
+    );
+    if (levels == null) return const SizedBox.shrink();
+    return AudioMeter(levelsDb: levels);
   }
 }
 
@@ -703,7 +718,6 @@ class _FloatingFeedLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    log('[_FloatingFeedLayer] build');
     return const FloatingReturnFeed();
   }
 }
@@ -719,14 +733,43 @@ class _CameraLayerState extends ConsumerState<_CameraLayer>
     with SingleTickerProviderStateMixin {
   AnimationController? _focusAnim;
   Offset? _focusPoint;
+  Timer? _focusResetTimer;
 
   void _onTap(TapUpDetails details) {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return;
     final localPos = box.globalToLocal(details.globalPosition);
-    final size = box.size;
-    final x = (localPos.dx / size.width).clamp(0.0, 1.0);
-    final y = (localPos.dy / size.height).clamp(0.0, 1.0);
+    final containerSize = box.size;
+
+    final orientation = MediaQuery.of(context).orientation;
+    final cameraAspectRatio = ref.read(broadcastControllerProvider).cameraAspectRatio;
+    final displayAspectRatio = orientation == Orientation.portrait
+        ? 1.0 / cameraAspectRatio
+        : cameraAspectRatio;
+
+    // Calculate active video rect fitted inside containerSize with displayAspectRatio
+    final containerAspect = containerSize.width / containerSize.height;
+    double videoW, videoH;
+    if (containerAspect > displayAspectRatio) {
+      videoH = containerSize.height;
+      videoW = videoH * displayAspectRatio;
+    } else {
+      videoW = containerSize.width;
+      videoH = videoW / displayAspectRatio;
+    }
+    final offsetX = (containerSize.width - videoW) / 2.0;
+    final offsetY = (containerSize.height - videoH) / 2.0;
+
+    // Ignore taps in letterbox / pillarbox padding outside active video
+    if (localPos.dx < offsetX ||
+        localPos.dx > offsetX + videoW ||
+        localPos.dy < offsetY ||
+        localPos.dy > offsetY + videoH) {
+      return;
+    }
+
+    final x = ((localPos.dx - offsetX) / videoW).clamp(0.0, 1.0);
+    final y = ((localPos.dy - offsetY) / videoH).clamp(0.0, 1.0);
 
     setState(() {
       _focusPoint = localPos;
@@ -745,17 +788,25 @@ class _CameraLayerState extends ConsumerState<_CameraLayer>
     });
 
     ref.read(broadcastControllerProvider.notifier).setFocusPoint(x, y);
+
+    // Auto-reset focus back to continuous auto-focus after 6 seconds
+    _focusResetTimer?.cancel();
+    _focusResetTimer = Timer(const Duration(seconds: 6), () {
+      if (mounted) {
+        ref.read(broadcastControllerProvider.notifier).resetFocus();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _focusResetTimer?.cancel();
     _focusAnim?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    log('[_CameraLayer] build');
     final orientation = MediaQuery.of(context).orientation;
     final cameraAspectRatio = ref
         .watch(broadcastControllerProvider)
@@ -815,7 +866,6 @@ class _OverlaysLayer extends ConsumerWidget {
   final bool cameraSettingsOpen;
   final VoidCallback onCameraSettingsToggle;
   final BroadcastUiState state;
-  final StreamStats? stats;
   final ReturnFeedUiState feedState;
   final VoidCallback onGoLive;
   final VoidCallback onOpenSettings;
@@ -827,7 +877,6 @@ class _OverlaysLayer extends ConsumerWidget {
     required this.cameraSettingsOpen,
     required this.onCameraSettingsToggle,
     required this.state,
-    required this.stats,
     required this.feedState,
     required this.onGoLive,
     required this.onOpenSettings,
@@ -837,7 +886,6 @@ class _OverlaysLayer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final size = MediaQuery.sizeOf(context);
-    log('[_OverlaysLayer] build: ${size.width}x${size.height}');
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -845,7 +893,6 @@ class _OverlaysLayer extends ConsumerWidget {
         _ChromeOverlay(
           visible: chromeVisible && !oledDimmed,
           state: state,
-          stats: stats,
           feedState: feedState,
           cameraSettingsOpen: cameraSettingsOpen,
           onCameraSettingsToggle: onCameraSettingsToggle,
@@ -864,14 +911,15 @@ class _OverlaysLayer extends ConsumerWidget {
             child: SingleChildScrollView(child: CameraControlsStrip()),
           ),
 
-        // Audio meter
-        if (chromeVisible && !oledDimmed && stats != null && state.isLive)
-          Positioned(
+        // Audio meter — isolated consumer so 20 Hz audio levels only rebuild this
+        // tiny widget instead of the whole camera/overlay tree.
+        if (chromeVisible && !oledDimmed && state.isLive)
+          const Positioned(
             left: 12,
             top: 0,
             bottom: 0,
             child: RepaintBoundary(
-              child: Center(child: AudioMeter(levelsDb: stats!.audioLevelDb)),
+              child: Center(child: _AudioMeterFeed()),
             ),
           ),
 

@@ -159,6 +159,7 @@ class ReturnFeedController extends Notifier<ReturnFeedUiState> {
       muted: state.muted,
       srtPassphrase: config.srtPassphrase,
       srtSenderMode: config.srtSenderMode,
+      maxHeight: config.maxHeight,
     );
   }
 

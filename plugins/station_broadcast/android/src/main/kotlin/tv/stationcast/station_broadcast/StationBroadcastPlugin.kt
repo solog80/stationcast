@@ -27,7 +27,6 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private lateinit var sipStatsChannel: EventChannel
     // Use BroadcastEngine (StreamPack) — working Camera2 + TS + SRT
     private lateinit var engine: BroadcastEngine
-    private lateinit var whipEngine: WhipEngine
     private var sipEngine: SipEngine? = null
     private lateinit var applicationContext: Context
     private var talkbackPlayer: TalkbackAudioPlayer? = null
@@ -47,18 +46,6 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
         }
         engine.onStats = { stats ->
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                statsSink?.success(stats)
-            }
-        }
-
-        whipEngine = WhipEngine(applicationContext)
-        whipEngine.onEvent = { state, message ->
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                eventSink?.success(mapOf("state" to state, "message" to message))
-            }
-        }
-        whipEngine.onStats = { stats ->
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 statsSink?.success(stats)
             }
@@ -170,7 +157,7 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
         binding.platformViewRegistry.registerViewFactory(
             "tv.stationcast/camera_preview",
-            CameraPreviewFactory(engine, whipEngine)
+            CameraPreviewFactory(engine)
         )
         binding.platformViewRegistry.registerViewFactory(
             "tv.stationcast/srt_player",
@@ -191,46 +178,20 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         when (call.method) {
             "initialize" -> launchCatching(result) {
                 val args = call.arguments as Map<*, *>
-                val width = (args["width"] as Number? ?: 1280).toInt()
-                val height = (args["height"] as Number? ?: 720).toInt()
-                val fps = (args["fps"] as Number? ?: 30).toInt()
-                whipEngine.setPreviewConfig(width, height, fps)
-                whipEngine.ensureCameraPreview(width, height, fps)
                 engine.initialize(args)
                 result.success(null)
             }
             "startStream" -> launchCatching(result) {
                 val args = call.arguments as Map<*, *>
-                val protocol = args["protocol"] as String?
-                if (protocol == "webrtc") {
-                    engine.stopAudioProbe()
-                    engine.onPreviewModeChanged?.invoke("webrtc")
-                    val webrtcUrl = args["webrtcUrl"] as String? ?: ""
-                    val width = (args["width"] as Number? ?: 1280).toInt()
-                    val height = (args["height"] as Number? ?: 720).toInt()
-                    val fps = (args["fps"] as Number? ?: 30).toInt()
-                    val bps = (args["videoBitrateBps"] as Number? ?: 3_000_000).toInt()
-                    whipEngine.startWhipStream(webrtcUrl, width, height, fps, bps)
-                } else {
-                    whipEngine.stopCameraPreview()
-                    engine.onPreviewModeChanged?.invoke("streampack")
-                    kotlinx.coroutines.delay(150)
-                    engine.startStream(args)
-                }
+                engine.startStream(args)
                 result.success(null)
             }
             "stopStream" -> launchCatching(result) {
-                whipEngine.stopWhipStream(keepPreview = false)
                 engine.stopStream()
-                engine.onPreviewModeChanged?.invoke("webrtc")
-                whipEngine.ensureCameraPreview()
                 result.success(null)
             }
             "switchCamera" -> launchCatching(result) {
-                whipEngine.switchCamera()
-                if (engine.streamer != null) {
-                    engine.switchCamera()
-                }
+                engine.switchCamera()
                 result.success(null)
             }
             "setTorch" -> launchCatching(result) {
@@ -244,7 +205,6 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "setMuted" -> {
                 val muted = call.argument<Boolean>("muted") ?: false
                 engine.setMuted(muted)
-                whipEngine.setMuted(muted)
                 result.success(null)
             }
             "setVideoBitrate" -> {
@@ -254,7 +214,6 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 } else {
                     launchCatching(result) {
                         engine.setVideoBitrate(bps)
-                        whipEngine.setVideoBitrate(bps)
                         result.success(null)
                     }
                 }
@@ -335,6 +294,10 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 val x = call.argument<Double>("x")?.toFloat() ?: 0.5f
                 val y = call.argument<Double>("y")?.toFloat() ?: 0.5f
                 engine.camera2SetFocusPoint(x, y)
+                result.success(null)
+            }
+            "camera2ResetFocus" -> launchCatching(result) {
+                engine.camera2ResetFocus()
                 result.success(null)
             }
             else -> result.notImplemented()

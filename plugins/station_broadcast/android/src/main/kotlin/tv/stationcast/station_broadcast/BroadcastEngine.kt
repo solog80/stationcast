@@ -196,6 +196,23 @@ class BroadcastEngine(private val context: Context) {
         }
         current.setTargetRotation(initialRotation)
         android.util.Log.d("[BroadcastEngine]", "Initial target rotation=$initialRotation (locked for stream duration)")
+
+        startForegroundService()
+
+        previewSurface?.let { surface ->
+            if (surface.isValid) {
+                val src = cameraSource()
+                if (src != null) {
+                    try {
+                        src.setPreview(surface)
+                        src.startPreview()
+                        android.util.Log.d("[BroadcastEngine]", "Initialized camera preview on surface")
+                    } catch (e: Exception) {
+                        android.util.Log.w("[BroadcastEngine]", "Failed to start preview on initialize: ${e.message}")
+                    }
+                }
+            }
+        }
     }
 
     private var baseWidth = 0
@@ -467,7 +484,8 @@ class BroadcastEngine(private val context: Context) {
     suspend fun takeSnapshot(): ByteArray? = null
     suspend fun camera2SetZoom(ratio: Float) = setZoom(ratio)
     suspend fun camera2SetFocusMode(mode: String) {
-        val cam = cameraSource()?.settings?.focus ?: return
+        val src = cameraSource() ?: return
+        val cam = src.settings.focus
         val value = when (mode) {
             "auto" -> android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_AUTO
             "continuous" -> android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
@@ -477,14 +495,25 @@ class BroadcastEngine(private val context: Context) {
             "edof" -> android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_EDOF
             else -> android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_OFF // manual, infinity
         }
-        if (value in cam.availableAutoModes) cam.setAutoMode(value)
+        if (value in cam.availableAutoModes) {
+            cam.setAutoMode(value)
+            src.settings.applyRepeatingSession()
+        }
     }
+
     suspend fun camera2SetExposureCompensation(ev: Int) {
-        val cam = cameraSource()?.settings?.exposure ?: return
-        cam.setCompensation(ev)
+        val src = cameraSource() ?: return
+        val exp = src.settings.exposure
+        if (android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON in exp.availableAutoModes) {
+            exp.setAutoMode(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON)
+        }
+        exp.setCompensation(ev)
+        src.settings.applyRepeatingSession()
     }
+
     suspend fun camera2SetWhiteBalance(mode: String) {
-        val cam = cameraSource()?.settings?.whiteBalance ?: return
+        val src = cameraSource() ?: return
+        val cam = src.settings.whiteBalance
         val value = when (mode) {
             "auto" -> android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_AUTO
             "incandescent" -> android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT
@@ -495,25 +524,38 @@ class BroadcastEngine(private val context: Context) {
             "shade" -> android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_SHADE
             else -> android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_OFF
         }
-        if (value in cam.availableAutoModes) cam.setAutoMode(value)
+        if (value in cam.availableAutoModes) {
+            cam.setAutoMode(value)
+            src.settings.applyRepeatingSession()
+        }
     }
+
     suspend fun camera2SetIsoSensitivity(iso: Int) {
-        val cam = cameraSource()?.settings?.iso ?: return
-        cam.setSensorSensitivity(iso)
+        val src = cameraSource() ?: return
+        val exp = src.settings.exposure
+        if (android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON in exp.availableAutoModes) {
+            exp.setAutoMode(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE_ON)
+        }
+        src.settings.applyRepeatingSession()
     }
+
     suspend fun camera2SetVideoStabilization(enabled: Boolean) {
-        android.util.Log.d("[BroadcastEngine]", "camera2SetVideoStabilization called with $enabled")
-        val cam = cameraSource()?.settings?.stabilization ?: return
-        cam.setIsEnableVideo(enabled)
+        val src = cameraSource() ?: return
+        src.settings.stabilization.setIsEnableVideo(enabled)
+        src.settings.applyRepeatingSession()
     }
+
     suspend fun camera2SetFlashMode(mode: String) {
-        val cam = cameraSource()?.settings?.flash ?: return
-        cam.setIsEnable(mode == "torch")
+        val src = cameraSource() ?: return
+        src.settings.flash.setIsEnable(mode == "torch")
+        src.settings.applyRepeatingSession()
     }
+
     fun camera2GetCapabilities(): Map<String, Any> {
         val src = cameraSource() ?: return emptyMap()
         val chars = src.settings.characteristics
         val expRange = chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+        val isoRange = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
         val maxZoom = chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
         return mapOf(
             "maxZoom" to maxZoom,
@@ -522,22 +564,48 @@ class BroadcastEngine(private val context: Context) {
                 "min" to (expRange?.lower ?: -4),
                 "max" to (expRange?.upper ?: 4)
             ),
+            "isoRange" to mapOf(
+                "min" to (isoRange?.lower ?: 100),
+                "max" to (isoRange?.upper ?: 3200)
+            ),
             "hasFlash" to src.settings.flash.isAvailable,
         )
     }
 
     suspend fun camera2InitializeManager() = Unit
     fun setMirrorFrontCamera(enabled: Boolean) = Unit
+
+    fun updateSurfaceFixedSize() {
+        val sv = previewSurfaceView ?: return
+        val w = if (baseWidth > 0) baseWidth else 1280
+        val h = if (baseHeight > 0) baseHeight else 720
+        // Always use landscape dimensions (max x min, e.g. 1280x720) for SurfaceHolder buffer size.
+        // Camera2 outputs landscape frames; setting swapped 720x1280 forces SurfaceFlinger
+        // to stretch and squash the camera buffer horizontally and vertically.
+        val targetW = kotlin.math.max(w, h)
+        val targetH = kotlin.math.min(w, h)
+        sv.post {
+            try {
+                sv.holder.setFixedSize(targetW, targetH)
+                android.util.Log.d("[BroadcastEngine]", "SurfaceView fixed size set to ${targetW}x${targetH}")
+            } catch (e: Exception) {
+                android.util.Log.w("[BroadcastEngine]", "Failed to set fixed surface size: ${e.message}")
+            }
+        }
+    }
+
     fun setPreviewSurface(surface: android.view.Surface?) {
         previewSurface = surface
+        updateSurfaceFixedSize()
         if (surface != null && surface.isValid) {
-            val src = cameraSource()
-            if (src != null) {
-                scope.launch {
+            scope.launch {
+                val src = cameraSource()
+                if (src != null) {
                     try {
+                        try { src.stopPreview() } catch (_: Exception) {}
                         src.setPreview(surface)
                         src.startPreview()
-                        android.util.Log.d("[BroadcastEngine]", "StreamPack setPreview surface succeeded")
+                        android.util.Log.d("[BroadcastEngine]", "StreamPack setPreview surface succeeded (re-attached)")
                     } catch (e: Exception) {
                         android.util.Log.w("[BroadcastEngine]", "StreamPack setPreview surface error: ${e.message}")
                     }
@@ -550,17 +618,31 @@ class BroadcastEngine(private val context: Context) {
         cam.setLensDistance(distance)
     }
 
-    /** Tap-to-focus: normalized coords 0..1 */
+    /** Tap-to-focus: normalized coords 0..1 relative to active preview box */
     suspend fun camera2SetFocusPoint(x: Float, y: Float) {
         val source = cameraSource() ?: return
-        val rect = android.hardware.camera2.params.MeteringRectangle(
-            (x * 2000 - 1000).toInt(),
-            (y * 2000 - 1000).toInt(),
-            200, 200, 1
-        )
+        val regionSize = 200
+        val span = 2000
+        val cx = (x.coerceIn(0f, 1f) * span).toInt().coerceIn(0, span - regionSize)
+        val cy = (y.coerceIn(0f, 1f) * span).toInt().coerceIn(0, span - regionSize)
+        val rect = android.hardware.camera2.params.MeteringRectangle(cx, cy, regionSize, regionSize, 1)
         source.settings.focus.setAutoMode(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_AUTO)
         source.settings.focus.setMeteringRegions(listOf(rect))
         source.settings.exposure.setMeteringRegions(listOf(rect))
+        source.settings.applyRepeatingSession()
+    }
+
+    /** Reset focus back to continuous video auto focus and clear metering regions */
+    suspend fun camera2ResetFocus() {
+        val source = cameraSource() ?: return
+        val continuousMode = android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+        if (continuousMode in source.settings.focus.availableAutoModes) {
+            source.settings.focus.setAutoMode(continuousMode)
+        } else {
+            source.settings.focus.setAutoMode(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_AUTO)
+        }
+        source.settings.focus.setMeteringRegions(emptyList())
+        source.settings.exposure.setMeteringRegions(emptyList())
         source.settings.applyRepeatingSession()
     }
 
@@ -642,12 +724,14 @@ class BroadcastEngine(private val context: Context) {
                 for (i in 0 until read) { val s = buf[i].toDouble(); sum += s * s }
                 val rms = kotlin.math.sqrt(sum / read)
                 val norm = (rms / 32768.0).coerceIn(0.0, 1.0)
-                if (norm > 0.015) {
-                    val dbfs = (20 * kotlin.math.log10(norm)).coerceIn(-60.0, 0.0)
-                    listOf(dbfs, dbfs)
-                } else null
-            } else null
-        } catch (_: Exception) { null }
+                val dbfs = if (norm > 0.001) {
+                    (20.0 * kotlin.math.log10(norm)).coerceIn(-60.0, 0.0)
+                } else {
+                    -60.0
+                }
+                listOf(dbfs, dbfs)
+            } else listOf(-60.0, -60.0)
+        } catch (_: Exception) { listOf(-60.0, -60.0) }
     }
 
     private fun initAudioProbe() {
@@ -721,14 +805,15 @@ class BroadcastEngine(private val context: Context) {
                 delay(1000)
             }
         }
-        // Fast audio level loop (~50ms for smooth VU meter)
+        // Audio level loop (~100ms = 10 Hz; smooth enough for the VU meter while
+        // halving platform-channel traffic / CPU (heat) during streaming).
         scope.launch {
             while (isActive) {
                 val audioLevelDb = readAudioLevelDb()
                 if (audioLevelDb != null) {
                     onStats?.invoke(mapOf("audioLevelDb" to audioLevelDb))
                 }
-                delay(50)
+                delay(100)
             }
         }
     }

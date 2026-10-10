@@ -252,9 +252,12 @@ class WhipEngine(private val context: Context) {
                     val sender = peerConnection?.addTrack(videoTrack, listOf("media_stream_0"))
                     sender?.let { s ->
                         val params = s.parameters
+                        params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
                         if (params.encodings.isNotEmpty()) {
                             params.encodings[0].maxBitrateBps = bitrateBps
+                            params.encodings[0].minBitrateBps = (bitrateBps * 0.8).toInt()
                             s.parameters = params
+                            Log.d(tag, "WebRTC RtpSender configured with MAINTAIN_RESOLUTION and maxBitrateBps=$bitrateBps")
                         }
                     }
                 }
@@ -452,10 +455,12 @@ class WhipEngine(private val context: Context) {
     fun setVideoBitrate(bps: Int) {
         peerConnection?.senders?.firstOrNull { it.track()?.kind() == "video" }?.let { sender ->
             val params = sender.parameters
+            params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
             if (params.encodings.isNotEmpty()) {
                 params.encodings[0].maxBitrateBps = bps
+                params.encodings[0].minBitrateBps = (bps * 0.8).toInt()
                 sender.parameters = params
-                Log.d(tag, "WebRTC video maxBitrateBps updated to $bps")
+                Log.d(tag, "WebRTC video maxBitrateBps updated to $bps (MAINTAIN_RESOLUTION locked)")
             }
         }
     }

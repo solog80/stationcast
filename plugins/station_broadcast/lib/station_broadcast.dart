@@ -204,4 +204,7 @@ class StationBroadcast {
 
   Future<void> camera2SetFocusPoint(double x, double y) =>
       _channel.invokeMethod('camera2SetFocusPoint', {'x': x, 'y': y});
+
+  Future<void> camera2ResetFocus() =>
+      _channel.invokeMethod('camera2ResetFocus');
 }

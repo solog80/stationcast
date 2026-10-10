@@ -293,6 +293,9 @@ class BroadcastController extends Notifier<BroadcastUiState> {
   Future<void> setFocusPoint(double x, double y) =>
       _plugin.camera2SetFocusPoint(x, y);
 
+  Future<void> resetFocus() =>
+      _plugin.camera2ResetFocus();
+
   void _onEngineEvent(BroadcastEvent event) {
     switch (event.state) {
       case BroadcastConnectionState.live:

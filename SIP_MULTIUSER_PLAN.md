@@ -106,7 +106,7 @@ Producer mutes a presenter to keep their mic off the Comrex bus until ready.
   - admin session required (Next API verifies the Firebase role claim)
   - added to the sidebar under Radio -> Studio and linked from Broadcast Monitor
 - Cache AMI events and push them to the dashboard.
-- New dashboard page **Radio Studio**:
+- New dashboard page **Live Radio** (`/broadcast/radio`, under Broadcasts):
   - participant list: name, extension, state, network
   - Ready queue
   - Route / Unmute, Mute, Remove
@@ -124,6 +124,13 @@ Producer mutes a presenter to keep their mic off the Comrex bus until ready.
 - Add local mic mute, Ready button, and On-air / "muted by producer" indicators (BFF -> mesh realtime).
 - Enable/verify PJSIP echo cancellation (WebRTC AEC, tail ~200-500 ms); essential with speakerphone.
 - Report presence to the BFF: uid, name, extension, ready/on-air, muted.
+- The radio page polls `GET /api/v1/bff/radio/presenters` (Firebase ID token,
+  verified by the BFF via Identity Toolkit) every 3 s. A second, swipe-up
+  **Connected presenters** page shows account names, Google/custom photos,
+  `YOU`, and `MUTED`/`ON AIR`. It is hidden when no presenters are connected,
+  so the radio page is unchanged in single-user mode.
+- The app-facing directory is read-only and never hangs calls. The producer
+  dashboard endpoint keeps its auto-hang duplicate behaviour.
 - Keep one SIP account per phone; unique credentials per presenter continue to arrive through `broadcast_config.radio` (per uid), with admin lock.
 
 ### 4. Provisioning, identity, security

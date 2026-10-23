@@ -48,7 +48,7 @@ On each phone: open **Radio** (registers the line), then press
 **Call Studio**. The app dials `100`; in dev, `100` joins
 `ConfBridge(presenters,...)`, so both phones land in room `7000`.
 
-Expected: each phone joins **MUTED**. Unmute each card in `/radio/studio` when
+Expected: each phone joins **MUTED**. Unmute each card in **Broadcasts → Live Radio** (`/broadcast/radio`) when
 ready. After unmuting, each phone hears the other, **not itself** (ConfBridge
 mix-minus). Use headphones; speaker feedback sounds like self-audio.
 

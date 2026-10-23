@@ -82,7 +82,7 @@ docker exec asterisk-dev asterisk -rx "confbridge list presenters"
 
 ## Producer UI path
 
-The dashboard (`/radio/studio`) does not talk to AMI directly. It calls the
+The dashboard (`/broadcast/radio`, Live Radio) does not talk to AMI directly. It calls the
 Next API, which verifies the admin session and forwards to the Dart BFF with a
 shared `RADIO_CONTROL_KEY`. The BFF reaches AMI over the tailnet.
 
@@ -92,8 +92,10 @@ shared `RADIO_CONTROL_KEY`. The BFF reaches AMI over the tailnet.
   `RADIO_CONTROL_KEY`
 - Next env (`.env.local`): `RADIO_BFF_URL=https://edge.solofx.net`,
   `RADIO_CONTROL_KEY`
-- Endpoints: `GET /api/v1/bff/radio/participants`,
-  `POST /api/v1/bff/radio/mute`, `POST /api/v1/bff/radio/comrex`
+- Endpoints: `GET /api/v1/bff/radio/participants` (admin `x-radio-key`),
+  `POST /api/v1/bff/radio/mute`, `POST /api/v1/bff/radio/comrex`,
+  and `GET /api/v1/bff/radio/presenters` (mobile Firebase ID token) for the
+  app's swipe-up presenter directory.
 - **Presenters join muted** (`presenters_user: startmuted=yes`); the Comrex
   uses `comrex_user` (`startmuted=no`), selected by
   `ASTERISK_CONFERENCE_USER=comrex_user` in the BFF env.

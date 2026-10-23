@@ -14,15 +14,14 @@ class SipPresetEditorScreen extends ConsumerStatefulWidget {
       _SipPresetEditorScreenState();
 }
 
-class _SipPresetEditorScreenState
-    extends ConsumerState<SipPresetEditorScreen> {
+class _SipPresetEditorScreenState extends ConsumerState<SipPresetEditorScreen> {
   final _formKey = GlobalKey<FormState>();
   late Future<SipPreset> _load;
   late SipPreset _preset;
 
   static const _codecLabels = {
+    'opus': 'Opus 48 kHz (Broadcast)',
     'g722': 'G.722 (EBU 3326)',
-    'opus': 'Opus',
     'pcmu': 'G.711 µ-law',
     'pcma': 'G.711 A-law',
   };
@@ -36,45 +35,59 @@ class _SipPresetEditorScreenState
 
   @override
   Widget build(BuildContext context) {
+    final locked =
+        ref.watch(sipPresetProvider).valueOrNull?.adminLocked ?? false;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Radio line'),
         actions: [
-          TextButton(
-            onPressed: () {
-              if (!(_formKey.currentState?.validate() ?? false)) return;
-              _formKey.currentState?.save();
-              if (!_preset.isConfigured) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Enter registrar, username and extension first',
+          if (!locked)
+            TextButton(
+              onPressed: () {
+                if (!(_formKey.currentState?.validate() ?? false)) return;
+                _formKey.currentState?.save();
+                if (!_preset.isConfigured) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Enter registrar, username and extension first',
+                      ),
                     ),
-                  ),
-                );
-                return;
-              }
-              // A saved line is meant to be usable: keep it enabled so the
-              // manual Connect button registers regardless.
-              ref
-                  .read(sipPresetProvider.notifier)
-                  .save(_preset.copyWith(enabled: true));
-              Navigator.of(context).pop();
-            },
-            child: const Text('Save'),
-          ),
+                  );
+                  return;
+                }
+                // A saved line is meant to be usable: keep it enabled so the
+                // manual Connect button registers regardless.
+                ref
+                    .read(sipPresetProvider.notifier)
+                    .save(_preset.copyWith(enabled: true));
+                Navigator.of(context).pop();
+              },
+              child: const Text('Save'),
+            ),
         ],
       ),
-      body: FutureBuilder<SipPreset>(
-        future: _load,
-        builder: (context, snap) {
-          if (!snap.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          _preset = snap.data!;
-          return _buildForm();
-        },
-      ),
+      body: locked
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'Radio settings are managed by your station admin.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: ControlRoomColors.textSecondary),
+                ),
+              ),
+            )
+          : FutureBuilder<SipPreset>(
+              future: _load,
+              builder: (context, snap) {
+                if (!snap.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                _preset = snap.data!;
+                return _buildForm();
+              },
+            ),
     );
   }
 
@@ -94,7 +107,8 @@ class _SipPresetEditorScreenState
               style: const TextStyle(color: ControlRoomColors.textSecondary),
             ),
             value: _preset.enabled,
-            onChanged: (v) => setState(() => _preset = _preset.copyWith(enabled: v)),
+            onChanged: (v) =>
+                setState(() => _preset = _preset.copyWith(enabled: v)),
           ),
           const SizedBox(height: 8),
           TextFormField(
@@ -150,14 +164,11 @@ class _SipPresetEditorScreenState
             decoration: const InputDecoration(labelText: 'Preferred codec'),
             items: _codecLabels.entries
                 .map(
-                  (e) => DropdownMenuItem(
-                    value: e.key,
-                    child: Text(e.value),
-                  ),
+                  (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
                 )
                 .toList(),
             onChanged: (v) {},
-            onSaved: (v) => _preset = _preset.copyWith(codec: v ?? 'g722'),
+            onSaved: (v) => _preset = _preset.copyWith(codec: v ?? 'opus'),
           ),
           const SizedBox(height: 16),
           SwitchListTile(
@@ -176,7 +187,10 @@ class _SipPresetEditorScreenState
             'EBU 3326 contribution over SIP. The studio console calls this '
             'device; audio is relayed by the registrar, so it works behind '
             'symmetric NAT.',
-            style: TextStyle(color: ControlRoomColors.textSecondary, fontSize: 12),
+            style: TextStyle(
+              color: ControlRoomColors.textSecondary,
+              fontSize: 12,
+            ),
           ),
         ],
       ),

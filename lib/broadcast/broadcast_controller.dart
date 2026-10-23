@@ -229,7 +229,9 @@ class BroadcastController extends Notifier<BroadcastUiState> {
   // Camera2 control methods
   Future<void> applyCameraSettings(CameraSettings camera) async {
     try {
-      log('[BroadcastController] applyCameraSettings: zoom=${camera.zoom}, EIS=${camera.videoStabilization}');
+      log(
+        '[BroadcastController] applyCameraSettings: zoom=${camera.zoom}, EIS=${camera.videoStabilization}',
+      );
       await _plugin.camera2SetZoom(camera.zoom);
       // Try batch (iOS), fall back to individual (Android)
       try {
@@ -293,8 +295,7 @@ class BroadcastController extends Notifier<BroadcastUiState> {
   Future<void> setFocusPoint(double x, double y) =>
       _plugin.camera2SetFocusPoint(x, y);
 
-  Future<void> resetFocus() =>
-      _plugin.camera2ResetFocus();
+  Future<void> resetFocus() => _plugin.camera2ResetFocus();
 
   void _onEngineEvent(BroadcastEvent event) {
     switch (event.state) {
@@ -343,10 +344,9 @@ class BroadcastController extends Notifier<BroadcastUiState> {
         errorLower.contains('rtmp')) {
       return 'Offline - Check your connection or server';
     } else if (errorLower.contains('permission') ||
-               errorLower.contains('denied')) {
+        errorLower.contains('denied')) {
       return 'Permission denied - Check camera/microphone access';
-    } else if (errorLower.contains('camera') ||
-               errorLower.contains('mic')) {
+    } else if (errorLower.contains('camera') || errorLower.contains('mic')) {
       return 'Camera or microphone not available';
     } else {
       return 'Connection failed - Try again';

@@ -65,11 +65,7 @@ class AudioMeterChannelState {
 }
 
 class AudioMeter extends StatefulWidget {
-  const AudioMeter({
-    super.key,
-    required this.levelsDb,
-    this.showLabels = true,
-  });
+  const AudioMeter({super.key, required this.levelsDb, this.showLabels = true});
 
   final List<double> levelsDb;
   final bool showLabels;
@@ -78,7 +74,8 @@ class AudioMeter extends StatefulWidget {
   State<AudioMeter> createState() => _AudioMeterState();
 }
 
-class _AudioMeterState extends State<AudioMeter> with SingleTickerProviderStateMixin {
+class _AudioMeterState extends State<AudioMeter>
+    with SingleTickerProviderStateMixin {
   late AnimationController _ticker;
   DateTime _lastTime = DateTime.now();
 
@@ -109,7 +106,9 @@ class _AudioMeterState extends State<AudioMeter> with SingleTickerProviderStateM
 
     if (dt <= 0) return;
 
-    final inL = widget.levelsDb.isNotEmpty ? widget.levelsDb[0] : AudioMeterBallistics.floorDb;
+    final inL = widget.levelsDb.isNotEmpty
+        ? widget.levelsDb[0]
+        : AudioMeterBallistics.floorDb;
     final inR = widget.levelsDb.length > 1 ? widget.levelsDb[1] : inL;
 
     final nextL = _leftChannel.step(inL, dt);
@@ -165,22 +164,21 @@ class _AudioMeterState extends State<AudioMeter> with SingleTickerProviderStateM
 }
 
 class _MeterBar extends StatelessWidget {
-  const _MeterBar({
-    required this.channelState,
-    this.label,
-  });
+  const _MeterBar({required this.channelState, this.label});
 
   final AudioMeterChannelState channelState;
   final String? label;
 
   @override
   Widget build(BuildContext context) {
-    final levelFrac = ((channelState.levelDb - AudioMeterBallistics.floorDb) /
-            (-AudioMeterBallistics.floorDb))
-        .clamp(0.0, 1.0);
-    final peakFrac = ((channelState.peakDb - AudioMeterBallistics.floorDb) /
-            (-AudioMeterBallistics.floorDb))
-        .clamp(0.0, 1.0);
+    final levelFrac =
+        ((channelState.levelDb - AudioMeterBallistics.floorDb) /
+                (-AudioMeterBallistics.floorDb))
+            .clamp(0.0, 1.0);
+    final peakFrac =
+        ((channelState.peakDb - AudioMeterBallistics.floorDb) /
+                (-AudioMeterBallistics.floorDb))
+            .clamp(0.0, 1.0);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -189,7 +187,7 @@ class _MeterBar extends StatelessWidget {
           width: 9,
           height: 72,
           child: CustomPaint(
-            painter: _BroadcastMeterPainter(
+            painter: BroadcastMeterPainter(
               levelFraction: levelFrac,
               peakFraction: peakFrac,
               peakDb: channelState.peakDb,
@@ -212,22 +210,27 @@ class _MeterBar extends StatelessWidget {
   }
 }
 
-class _BroadcastMeterPainter extends CustomPainter {
+class BroadcastMeterPainter extends CustomPainter {
   final double levelFraction;
   final double peakFraction;
   final double peakDb;
+  final double borderRadius;
 
-  _BroadcastMeterPainter({
+  BroadcastMeterPainter({
     required this.levelFraction,
     required this.peakFraction,
     required this.peakDb,
+    this.borderRadius = 2.0,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final trackPaint = Paint()..color = ControlRoomColors.surfaceRaised;
     canvas.drawRRect(
-      RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(2)),
+      RRect.fromRectAndRadius(
+        Offset.zero & size,
+        Radius.circular(borderRadius),
+      ),
       trackPaint,
     );
 
@@ -236,7 +239,9 @@ class _BroadcastMeterPainter extends CustomPainter {
       ..color = Colors.white12
       ..strokeWidth = 1.0;
     for (final markDb in [-6.0, -18.0, -36.0]) {
-      final markFrac = (markDb - AudioMeterBallistics.floorDb) / (-AudioMeterBallistics.floorDb);
+      final markFrac =
+          (markDb - AudioMeterBallistics.floorDb) /
+          (-AudioMeterBallistics.floorDb);
       final y = size.height * (1.0 - markFrac);
       canvas.drawLine(Offset(0, y), Offset(size.width, y), markPaint);
     }
@@ -258,7 +263,7 @@ class _BroadcastMeterPainter extends CustomPainter {
       ).createShader(Offset.zero & size);
 
       canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, const Radius.circular(2)),
+        RRect.fromRectAndRadius(rect, Radius.circular(borderRadius)),
         Paint()..shader = gradient,
       );
     }
@@ -268,7 +273,9 @@ class _BroadcastMeterPainter extends CustomPainter {
       final peakY = size.height * (1.0 - peakFraction);
       final Color peakColor = peakDb >= -6.0
           ? const Color(0xFFFF5C52)
-          : (peakDb >= -18.0 ? const Color(0xFFF5D052) : const Color(0xFF56EB84));
+          : (peakDb >= -18.0
+                ? const Color(0xFFF5D052)
+                : const Color(0xFF56EB84));
 
       final peakPaint = Paint()
         ..color = peakColor
@@ -283,9 +290,10 @@ class _BroadcastMeterPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_BroadcastMeterPainter oldDelegate) {
+  bool shouldRepaint(BroadcastMeterPainter oldDelegate) {
     return oldDelegate.levelFraction != levelFraction ||
         oldDelegate.peakFraction != peakFraction ||
-        oldDelegate.peakDb != peakDb;
+        oldDelegate.peakDb != peakDb ||
+        oldDelegate.borderRadius != borderRadius;
   }
 }

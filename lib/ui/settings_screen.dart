@@ -39,6 +39,29 @@ class SettingsScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (returnFeed.lockedSections.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.withOpacity(0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.lock, size: 16, color: Colors.amber),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Managed by your station admin: '
+                      '${returnFeed.lockedSections.join(", ")}',
+                      style: const TextStyle(fontSize: 12, color: Colors.amber),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           _sectionHeader('Destinations'),
           for (final preset in presets)
             Card(
@@ -49,8 +72,11 @@ class SettingsScreen extends ConsumerWidget {
                     preset.isDefault ? Icons.star : Icons.star_border,
                     color: preset.isDefault ? Colors.amber : Colors.white38,
                   ),
-                  onPressed: () =>
-                      ref.read(presetsProvider.notifier).setDefault(preset.id),
+                  onPressed: returnFeed.lockedSections.contains('destinations')
+                      ? null
+                      : () => ref
+                            .read(presetsProvider.notifier)
+                            .setDefault(preset.id),
                 ),
                 title: Row(
                   children: [
@@ -86,23 +112,30 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 trailing: IconButton(
                   icon: const Icon(Icons.delete_outline),
-                  onPressed: () =>
-                      ref.read(presetsProvider.notifier).remove(preset.id),
+                  onPressed: returnFeed.lockedSections.contains('destinations')
+                      ? null
+                      : () => ref
+                            .read(presetsProvider.notifier)
+                            .remove(preset.id),
                 ),
-                onTap: () => _editPreset(context, ref, preset),
+                onTap: returnFeed.lockedSections.contains('destinations')
+                    ? null
+                    : () => _editPreset(context, ref, preset),
               ),
             ),
           OutlinedButton.icon(
             icon: const Icon(Icons.add),
             label: const Text('Add destination'),
-            onPressed: () => _editPreset(
-              context,
-              ref,
-              DestinationPreset(
-                id: DateTime.now().microsecondsSinceEpoch.toString(),
-                name: 'Station',
-              ),
-            ),
+            onPressed: returnFeed.lockedSections.contains('destinations')
+                ? null
+                : () => _editPreset(
+                    context,
+                    ref,
+                    DestinationPreset(
+                      id: DateTime.now().microsecondsSinceEpoch.toString(),
+                      name: 'Station',
+                    ),
+                  ),
           ),
           const SizedBox(height: 24),
           _sectionHeader('Radio'),
@@ -192,10 +225,18 @@ class _RadioLineCard extends ConsumerWidget {
           'SIP · $status',
           style: const TextStyle(color: ControlRoomColors.textSecondary),
         ),
-        trailing: const Icon(Icons.chevron_right, size: 18),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => const SipPresetEditorScreen()),
+        trailing: Icon(
+          preset.adminLocked ? Icons.lock : Icons.chevron_right,
+          size: 18,
+          color: preset.adminLocked ? Colors.amber : null,
         ),
+        onTap: preset.adminLocked
+            ? null
+            : () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const SipPresetEditorScreen(),
+                ),
+              ),
       ),
     );
   }
@@ -208,7 +249,9 @@ class PresetEditorScreen extends StatefulWidget {
 
   @override
   State<PresetEditorScreen> createState() => _PresetEditorScreenState();
-}class _PresetEditorScreenState extends State<PresetEditorScreen> {
+}
+
+class _PresetEditorScreenState extends State<PresetEditorScreen> {
   final _formKey = GlobalKey<FormState>();
   late var _preset = widget.preset;
 
@@ -268,9 +311,12 @@ class PresetEditorScreen extends StatefulWidget {
             const SizedBox(height: 12),
             SwitchListTile(
               title: const Text('Default Destination'),
-              subtitle: const Text('Automatically use this destination when streaming'),
+              subtitle: const Text(
+                'Automatically use this destination when streaming',
+              ),
               value: _preset.isDefault,
-              onChanged: (v) => setState(() => _preset = _preset.copyWith(isDefault: v)),
+              onChanged: (v) =>
+                  setState(() => _preset = _preset.copyWith(isDefault: v)),
             ),
             const SizedBox(height: 12),
           ],
@@ -466,6 +512,14 @@ class _EncoderSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final locked =
+        ref
+            .watch(returnFeedConfigProvider)
+            .valueOrNull
+            ?.lockedSections
+            .contains('encoder') ??
+        false;
+    if (locked) return const _LockedCard(label: 'Encoder');
     final notifier = ref.read(encoderSettingsProvider.notifier);
     return Card(
       color: ControlRoomColors.surface,
@@ -577,6 +631,14 @@ class _RecordingSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final locked =
+        ref
+            .watch(returnFeedConfigProvider)
+            .valueOrNull
+            ?.lockedSections
+            .contains('recording') ??
+        false;
+    if (locked) return const _LockedCard(label: 'Recording');
     final notifier = ref.read(recordingSettingsProvider.notifier);
     return Card(
       color: ControlRoomColors.surface,
@@ -651,8 +713,7 @@ class _RecordingSection extends ConsumerWidget {
               'Enabled',
               Switch(
                 value: recording.enabled,
-                onChanged: (v) =>
-                    notifier.save(recording.copyWith(enabled: v)),
+                onChanged: (v) => notifier.save(recording.copyWith(enabled: v)),
               ),
             ),
             const Text(
@@ -693,6 +754,10 @@ class _ReturnFeedSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notifier = ref.read(returnFeedConfigProvider.notifier);
+    final locked = config.lockedSections;
+    final lockReturn = locked.contains('returnFeed');
+    final lockBroadcaster = locked.contains('broadcaster');
+    final lockTalkback = locked.contains('talkback');
     return Card(
       color: ControlRoomColors.surface,
       child: Padding(
@@ -702,6 +767,7 @@ class _ReturnFeedSection extends ConsumerWidget {
           children: [
             TextFormField(
               initialValue: config.url,
+              readOnly: lockReturn,
               decoration: const InputDecoration(
                 labelText: 'Return feed URL',
                 hintText: 'srt://salttelevision.com:8011',
@@ -715,6 +781,7 @@ class _ReturnFeedSection extends ConsumerWidget {
                 labelText: 'Latency / buffer (ms)',
               ),
               keyboardType: TextInputType.number,
+              readOnly: lockReturn,
               onChanged: (v) {
                 final ms = int.tryParse(v);
                 if (ms != null) notifier.save(config.copyWith(latencyMs: ms));
@@ -727,6 +794,7 @@ class _ReturnFeedSection extends ConsumerWidget {
                 labelText: 'SRT Passphrase (optional)',
               ),
               obscureText: true,
+              readOnly: lockReturn,
               onChanged: (v) =>
                   notifier.save(config.copyWith(srtPassphrase: v)),
             ),
@@ -751,9 +819,11 @@ class _ReturnFeedSection extends ConsumerWidget {
                       child: Text('Rendezvous'),
                     ),
                   ],
-                  onChanged: (m) => m == null
+                  onChanged: lockReturn
                       ? null
-                      : notifier.save(config.copyWith(srtSenderMode: m)),
+                      : (m) => m == null
+                            ? null
+                            : notifier.save(config.copyWith(srtSenderMode: m)),
                 ),
               ],
             ),
@@ -772,9 +842,11 @@ class _ReturnFeedSection extends ConsumerWidget {
                     DropdownMenuItem(value: 720, child: Text('720p')),
                     DropdownMenuItem(value: 480, child: Text('480p')),
                   ],
-                  onChanged: (h) => h == null
+                  onChanged: lockReturn
                       ? null
-                      : notifier.save(config.copyWith(maxHeight: h)),
+                      : (h) => h == null
+                            ? null
+                            : notifier.save(config.copyWith(maxHeight: h)),
                 ),
               ],
             ),
@@ -795,9 +867,11 @@ class _ReturnFeedSection extends ConsumerWidget {
                       child: Text('media_kit'),
                     ),
                   ],
-                  onChanged: (b) => b == null
+                  onChanged: lockReturn
                       ? null
-                      : notifier.save(config.copyWith(backend: b)),
+                      : (b) => b == null
+                            ? null
+                            : notifier.save(config.copyWith(backend: b)),
                 ),
               ],
             ),
@@ -805,14 +879,17 @@ class _ReturnFeedSection extends ConsumerWidget {
               contentPadding: EdgeInsets.zero,
               title: const Text('Show automatically when going live'),
               value: config.autoplayOnLive,
-              onChanged: (v) =>
-                  notifier.save(config.copyWith(autoplayOnLive: v)),
+              onChanged: lockReturn
+                  ? null
+                  : (v) => notifier.save(config.copyWith(autoplayOnLive: v)),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Start muted (echo protection)'),
               value: config.startMuted,
-              onChanged: (v) => notifier.save(config.copyWith(startMuted: v)),
+              onChanged: lockReturn
+                  ? null
+                  : (v) => notifier.save(config.copyWith(startMuted: v)),
             ),
             const Divider(height: 24),
             const Text(
@@ -831,6 +908,7 @@ class _ReturnFeedSection extends ConsumerWidget {
                 labelText: 'Broadcaster ID',
                 hintText: 'e.g. presenter-1-mbale',
               ),
+              readOnly: lockBroadcaster,
               onChanged: (v) {
                 notifier.save(config.copyWith(broadcasterId: v));
                 if (v.isNotEmpty) {
@@ -846,6 +924,7 @@ class _ReturnFeedSection extends ConsumerWidget {
                 labelText: 'Display name',
                 hintText: 'e.g. Field Presenter 1 (Mbale)',
               ),
+              readOnly: lockBroadcaster,
               onChanged: (v) {
                 notifier.save(config.copyWith(broadcasterName: v));
                 if (config.broadcasterId.isNotEmpty) {
@@ -870,8 +949,9 @@ class _ReturnFeedSection extends ConsumerWidget {
               contentPadding: EdgeInsets.zero,
               title: const Text('Enable talkback (audio intercom)'),
               value: config.talkbackEnabled,
-              onChanged: (v) =>
-                  notifier.save(config.copyWith(talkbackEnabled: v)),
+              onChanged: lockTalkback
+                  ? null
+                  : (v) => notifier.save(config.copyWith(talkbackEnabled: v)),
             ),
             TextFormField(
               initialValue: config.talkbackUrl,
@@ -879,7 +959,7 @@ class _ReturnFeedSection extends ConsumerWidget {
                 labelText: 'Talkback SRT URL',
                 hintText: 'srt://talkback.server.com:port',
               ),
-              enabled: config.talkbackEnabled,
+              enabled: config.talkbackEnabled && !lockTalkback,
               onChanged: (v) => notifier.save(config.copyWith(talkbackUrl: v)),
             ),
             TextFormField(
@@ -888,7 +968,7 @@ class _ReturnFeedSection extends ConsumerWidget {
                 labelText: 'Talkback latency (ms)',
               ),
               keyboardType: TextInputType.number,
-              enabled: config.talkbackEnabled,
+              enabled: config.talkbackEnabled && !lockTalkback,
               onChanged: (v) {
                 final ms = int.tryParse(v);
                 if (ms != null)
@@ -901,9 +981,40 @@ class _ReturnFeedSection extends ConsumerWidget {
                 labelText: 'Talkback SRT Passphrase (optional)',
               ),
               obscureText: true,
-              enabled: config.talkbackEnabled,
+              enabled: config.talkbackEnabled && !lockTalkback,
               onChanged: (v) =>
                   notifier.save(config.copyWith(talkbackPassphrase: v)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LockedCard extends StatelessWidget {
+  const _LockedCard({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: ControlRoomColors.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            const Icon(Icons.lock, size: 16, color: Colors.amber),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '$label settings are managed by your station admin.',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: ControlRoomColors.textSecondary,
+                ),
+              ),
             ),
           ],
         ),

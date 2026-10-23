@@ -108,10 +108,10 @@ class _CameraControlsStripState extends ConsumerState<CameraControlsStrip> {
         );
       } else if (item.type == _ControlType.eis) {
         final newEis = !camera.videoStabilization;
-        log('[EIS Toggle] Current zoom=${camera.zoom}, toggling EIS to $newEis');
-        notifier.save(
-          camera.copyWith(videoStabilization: newEis),
+        log(
+          '[EIS Toggle] Current zoom=${camera.zoom}, toggling EIS to $newEis',
         );
+        notifier.save(camera.copyWith(videoStabilization: newEis));
       }
     } else {
       setState(() => _expanded = _expanded == item.type ? null : item.type);

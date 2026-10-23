@@ -51,8 +51,12 @@ class _StationCastAppState extends ConsumerState<StationCastApp> {
   }
 
   Widget _buildHome() {
-    if (_onboardingComplete == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (!_onboardingComplete!) return OnboardingScreen(onComplete: () => setState(() => _onboardingComplete = true));
+    if (_onboardingComplete == null)
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (!_onboardingComplete!)
+      return OnboardingScreen(
+        onComplete: () => setState(() => _onboardingComplete = true),
+      );
     return _user != null ? const HomeScreen() : const LoginScreen();
   }
 }

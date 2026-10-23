@@ -46,11 +46,23 @@ class _FirstLaunchTipsState extends State<FirstLaunchTips>
                 child: Column(
                   children: [
                     const Spacer(flex: 3),
-                    _tip(Icons.touch_app, 'Tap to focus', alignment: Alignment.center),
+                    _tip(
+                      Icons.touch_app,
+                      'Tap to focus',
+                      alignment: Alignment.center,
+                    ),
                     const Spacer(),
-                    _tip(Icons.swipe, 'Swipe to show/hide controls', alignment: Alignment.center),
+                    _tip(
+                      Icons.swipe,
+                      'Swipe to show/hide controls',
+                      alignment: Alignment.center,
+                    ),
                     const Spacer(),
-                    _tip(Icons.timer, 'Long-press zoom pill for fine slider', alignment: Alignment.center),
+                    _tip(
+                      Icons.timer,
+                      'Long-press zoom pill for fine slider',
+                      alignment: Alignment.center,
+                    ),
                     const Spacer(flex: 4),
                   ],
                 ),
@@ -61,7 +73,11 @@ class _FirstLaunchTipsState extends State<FirstLaunchTips>
     );
   }
 
-  Widget _tip(IconData icon, String text, {Alignment alignment = Alignment.center}) {
+  Widget _tip(
+    IconData icon,
+    String text, {
+    Alignment alignment = Alignment.center,
+  }) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 40),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

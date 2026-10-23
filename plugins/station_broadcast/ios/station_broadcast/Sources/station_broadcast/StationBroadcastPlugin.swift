@@ -1,5 +1,6 @@
 import AVFoundation
 import Flutter
+import StationSip
 import UIKit
 
 public class StationBroadcastPlugin: NSObject, FlutterPlugin {
@@ -8,6 +9,9 @@ public class StationBroadcastPlugin: NSObject, FlutterPlugin {
     private var statsSink: FlutterEventSink?
     private var histogramSink: FlutterEventSink?
     private var recordingSink: FlutterEventSink?
+    private let sip = StationSip()
+    private var sipEventSink: FlutterEventSink?
+    private var sipStatsSink: FlutterEventSink?
 
     @MainActor
     override init() {
@@ -25,6 +29,7 @@ public class StationBroadcastPlugin: NSObject, FlutterPlugin {
         engine.onRecording = { [weak self] event, data in
             self?.recordingSink?(["event": event, "data": data as Any])
         }
+        sip.delegate = self
     }
 
     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -47,7 +52,10 @@ public class StationBroadcastPlugin: NSObject, FlutterPlugin {
         let histogramChannel = FlutterEventChannel(
             name: "tv.stationcast/broadcast/histogram", binaryMessenger: registrar.messenger())
         histogramChannel.setStreamHandler(
-            ChannelStreamHandler { sink in instance.histogramSink = sink })
+            ChannelStreamHandler { sink in
+                instance.histogramSink = sink
+                MainActor.assumeIsolated { instance.engine.setHistogramEnabled(sink != nil) }
+            })
 
         let recordingChannel = FlutterEventChannel(
             name: "tv.stationcast/broadcast/recording", binaryMessenger: registrar.messenger())
@@ -59,6 +67,22 @@ public class StationBroadcastPlugin: NSObject, FlutterPlugin {
 
         let srtPlayerFactory = MainActor.assumeIsolated { SrtPlayerFactory(binaryMessenger: registrar.messenger()) }
         registrar.register(srtPlayerFactory, withId: "tv.stationcast/srt_player")
+
+        let sipChannel = FlutterMethodChannel(
+            name: "tv.stationcast/sip", binaryMessenger: registrar.messenger())
+        sipChannel.setMethodCallHandler { [weak instance] call, result in
+            instance?.handleSip(call, result: result)
+        }
+
+        let sipEvents = FlutterEventChannel(
+            name: "tv.stationcast/sip/events", binaryMessenger: registrar.messenger())
+        sipEvents.setStreamHandler(
+            ChannelStreamHandler { sink in instance.sipEventSink = sink })
+
+        let sipStats = FlutterEventChannel(
+            name: "tv.stationcast/sip/stats", binaryMessenger: registrar.messenger())
+        sipStats.setStreamHandler(
+            ChannelStreamHandler { sink in instance.sipStatsSink = sink })
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -164,6 +188,63 @@ public class StationBroadcastPlugin: NSObject, FlutterPlugin {
                     FlutterError(
                         code: "broadcast_error", message: error.localizedDescription, details: nil))
             }
+        }
+    }
+}
+
+extension StationBroadcastPlugin: StationSipDelegate {
+    public func sipEvent(_ state: String, peer: String?, message: String?) {
+        var map: [String: Any] = ["state": state]
+        if let peer = peer { map["peer"] = peer }
+        if let message = message { map["message"] = message }
+        DispatchQueue.main.async { [weak self] in
+            self?.sipEventSink?(map)
+        }
+    }
+
+    public func sipStats(_ stats: [String: Any]) {
+        DispatchQueue.main.async { [weak self] in
+            self?.sipStatsSink?(stats)
+        }
+    }
+}
+
+extension StationBroadcastPlugin {
+    func handleSip(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        let args = call.arguments as? [String: Any?] ?? [:]
+        switch call.method {
+        case "initialize":
+            sip.initializeEngine()
+            result(nil)
+        case "register":
+            sip.register(
+                withHost: args["registrarHost"] as? String ?? "",
+                port: Int32((args["registrarPort"] as? NSNumber)?.intValue ?? 5060),
+                username: args["username"] as? String ?? "",
+                password: args["password"] as? String ?? "",
+                extension: args["extension"] as? String ?? "",
+                codec: args["codec"] as? String ?? "opus")
+            result(nil)
+        case "accept":
+            sip.acceptCall()
+            result(nil)
+        case "decline":
+            sip.declineCall()
+            result(nil)
+        case "hangup":
+            sip.hangupCall()
+            result(nil)
+        case "dial":
+            sip.dialTarget(args["target"] as? String ?? "")
+            result(nil)
+        case "unregister":
+            sip.unregister()
+            result(nil)
+        case "dispose":
+            sip.dispose()
+            result(nil)
+        default:
+            result(FlutterMethodNotImplemented)
         }
     }
 }

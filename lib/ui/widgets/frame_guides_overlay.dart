@@ -5,10 +5,7 @@ class FrameGuidesOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _SafeAreaPainter(),
-      size: Size.infinite,
-    );
+    return CustomPaint(painter: _SafeAreaPainter(), size: Size.infinite);
   }
 }
 
@@ -18,9 +15,7 @@ class _SafeAreaPainter extends CustomPainter {
     final w = size.width;
     final h = size.height;
 
-    final rect = Rect.fromLTWH(
-      w * 0.1, h * 0.1, w * 0.8, h * 0.8,
-    );
+    final rect = Rect.fromLTWH(w * 0.1, h * 0.1, w * 0.8, h * 0.8);
 
     final outline = Paint()
       ..style = PaintingStyle.stroke

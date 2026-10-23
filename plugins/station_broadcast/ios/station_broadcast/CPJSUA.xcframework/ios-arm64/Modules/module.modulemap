@@ -1,0 +1,4 @@
+module CPJSUA {
+    header "../Headers/pjsua-lib/pjsua.h"
+    export *
+}

@@ -132,7 +132,8 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
         break;
       }
     }
-    final preset = defaultPreset ??
+    final preset =
+        defaultPreset ??
         (presets.length == 1 ? presets.first : await _pickPreset(presets));
     if (preset == null) return;
     await ref.read(broadcastControllerProvider.notifier).goLive(preset);
@@ -578,10 +579,7 @@ class _StatsReadout extends ConsumerWidget {
           label: '${(stat.$1 / 1000000).toStringAsFixed(1)} Mbps',
         ),
         const SizedBox(width: 8),
-        _MetaChip(
-          icon: Icons.speed,
-          label: '${stat.$2.toStringAsFixed(0)} ms',
-        ),
+        _MetaChip(icon: Icons.speed, label: '${stat.$2.toStringAsFixed(0)} ms'),
         const SizedBox(width: 8),
         _MetaChip(icon: Icons.warning_amber, label: '${stat.$3} drop'),
       ],
@@ -742,7 +740,9 @@ class _CameraLayerState extends ConsumerState<_CameraLayer>
     final containerSize = box.size;
 
     final orientation = MediaQuery.of(context).orientation;
-    final cameraAspectRatio = ref.read(broadcastControllerProvider).cameraAspectRatio;
+    final cameraAspectRatio = ref
+        .read(broadcastControllerProvider)
+        .cameraAspectRatio;
     final displayAspectRatio = orientation == Orientation.portrait
         ? 1.0 / cameraAspectRatio
         : cameraAspectRatio;
@@ -918,9 +918,7 @@ class _OverlaysLayer extends ConsumerWidget {
             left: 12,
             top: 0,
             bottom: 0,
-            child: RepaintBoundary(
-              child: Center(child: _AudioMeterFeed()),
-            ),
+            child: RepaintBoundary(child: Center(child: _AudioMeterFeed())),
           ),
 
         // Histogram — inside safe area guide bottom-right

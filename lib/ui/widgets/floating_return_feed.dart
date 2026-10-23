@@ -17,7 +17,7 @@ class FloatingReturnFeed extends ConsumerStatefulWidget {
 
 class _FloatingReturnFeedState extends ConsumerState<FloatingReturnFeed> {
   static const _margin = 12.0;
-  static const _topBarHeight = 44.0;   // room for OnAir + indicators
+  static const _topBarHeight = 44.0; // room for OnAir + indicators
   static const _portraitBottomBar = 100.0; // room for controls + metadata
   static const _landscapeBottomBar = 0.0;
   Offset _position = const Offset(_margin, _margin + _topBarHeight);
@@ -26,14 +26,19 @@ class _FloatingReturnFeedState extends ConsumerState<FloatingReturnFeed> {
   Size _lastScreenSize = Size.zero;
 
   double _bottomBarHeight(Size screen) {
-    return screen.width > screen.height ? _landscapeBottomBar : _portraitBottomBar;
+    return screen.width > screen.height
+        ? _landscapeBottomBar
+        : _portraitBottomBar;
   }
 
   void _constrainPosition(Size screen, EdgeInsets safe, double height) {
     final bottomBar = _bottomBarHeight(screen);
     _position = Offset(
       _position.dx.clamp(_margin, screen.width - _width - _margin),
-      _position.dy.clamp(safe.top + _topBarHeight, screen.height - height - safe.bottom - bottomBar),
+      _position.dy.clamp(
+        safe.top + _topBarHeight,
+        screen.height - height - safe.bottom - bottomBar,
+      ),
     );
   }
 
@@ -49,11 +54,15 @@ class _FloatingReturnFeedState extends ConsumerState<FloatingReturnFeed> {
     final orientation = MediaQuery.of(context).orientation;
     final bottomBar = _bottomBarHeight(screen);
 
-    log('[FloatingReturnFeed] build: ${screen.width}x${screen.height} ($orientation), pos=${_position.dx},${_position.dy}');
+    log(
+      '[FloatingReturnFeed] build: ${screen.width}x${screen.height} ($orientation), pos=${_position.dx},${_position.dy}',
+    );
 
     // Re-constrain position if screen size changed (orientation changed)
     if (_lastScreenSize != screen) {
-      log('[FloatingReturnFeed] Screen size changed from ${_lastScreenSize.width}x${_lastScreenSize.height} to ${screen.width}x${screen.height}');
+      log(
+        '[FloatingReturnFeed] Screen size changed from ${_lastScreenSize.width}x${_lastScreenSize.height} to ${screen.width}x${screen.height}',
+      );
       _lastScreenSize = screen;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -74,10 +83,14 @@ class _FloatingReturnFeedState extends ConsumerState<FloatingReturnFeed> {
         onPanUpdate: (details) {
           setState(() {
             _position = Offset(
-              (_position.dx + details.delta.dx)
-                  .clamp(_margin, screen.width - _width - _margin),
-              (_position.dy + details.delta.dy)
-                  .clamp(safe.top + _topBarHeight, screen.height - height - safe.bottom - bottomBar),
+              (_position.dx + details.delta.dx).clamp(
+                _margin,
+                screen.width - _width - _margin,
+              ),
+              (_position.dy + details.delta.dy).clamp(
+                safe.top + _topBarHeight,
+                screen.height - height - safe.bottom - bottomBar,
+              ),
             );
           });
         },
@@ -99,7 +112,11 @@ class _FloatingReturnFeedState extends ConsumerState<FloatingReturnFeed> {
               width: 1.5,
             ),
             boxShadow: const [
-              BoxShadow(color: Colors.black54, blurRadius: 12, offset: Offset(0, 4)),
+              BoxShadow(
+                color: Colors.black54,
+                blurRadius: 12,
+                offset: Offset(0, 4),
+              ),
             ],
           ),
           child: Stack(
@@ -120,7 +137,9 @@ class _FloatingReturnFeedState extends ConsumerState<FloatingReturnFeed> {
                     ),
                     child: Icon(
                       state.muted ? Icons.volume_off : Icons.volume_up,
-                      color: state.muted ? ControlRoomColors.amber : Colors.white70,
+                      color: state.muted
+                          ? ControlRoomColors.amber
+                          : Colors.white70,
                       size: 18,
                     ),
                   ),
@@ -145,7 +164,10 @@ class _FloatingReturnFeedState extends ConsumerState<FloatingReturnFeed> {
             child: Text(
               'No return feed URL set',
               textAlign: TextAlign.center,
-              style: TextStyle(color: ControlRoomColors.textSecondary, fontSize: 12),
+              style: TextStyle(
+                color: ControlRoomColors.textSecondary,
+                fontSize: 12,
+              ),
             ),
           ),
         );
@@ -178,7 +200,10 @@ class _FloatingReturnFeedState extends ConsumerState<FloatingReturnFeed> {
     }
   }
 
-  Widget _buildControls(ReturnFeedUiState state, ReturnFeedController controller) {
+  Widget _buildControls(
+    ReturnFeedUiState state,
+    ReturnFeedController controller,
+  ) {
     return Container(
       color: Colors.black45,
       child: Row(

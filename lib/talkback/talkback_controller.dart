@@ -17,11 +17,7 @@ class TalkbackState {
   final bool connected;
   final bool active;
 
-  TalkbackState copyWith({
-    bool? enabled,
-    bool? connected,
-    bool? active,
-  }) =>
+  TalkbackState copyWith({bool? enabled, bool? connected, bool? active}) =>
       TalkbackState(
         enabled: enabled ?? this.enabled,
         connected: connected ?? this.connected,
@@ -94,7 +90,10 @@ final talkbackAutoProvider = Provider<void>((ref) {
   final isLive = ref.watch(broadcastControllerProvider.select((s) => s.isLive));
   final config = ref.watch(returnFeedConfigProvider).valueOrNull;
 
-  if (isLive && config != null && config.talkbackEnabled && config.talkbackUrl.isNotEmpty) {
+  if (isLive &&
+      config != null &&
+      config.talkbackEnabled &&
+      config.talkbackUrl.isNotEmpty) {
     ref.read(talkbackControllerProvider.notifier).start();
   } else if (!isLive) {
     ref.read(talkbackControllerProvider.notifier).stop();

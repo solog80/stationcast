@@ -1,6 +1,9 @@
 package tv.stationcast.station_broadcast
 
 import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -67,10 +70,17 @@ class SipEngine(private val appContext: Context) {
   private var logWriter: LogWriter? = null
   private var account: RadioAccount? = null
   private var call: RadioCall? = null
-  private var currentCodec: String = "G722"
+  private var currentCodec: String = "OPUS"
   private var statsRunnable: Runnable? = null
   private var levelRunnable: Runnable? = null
   private val errorCodeOk = 0
+
+  private external fun nativeInitOpus(
+    sampleRate: Int,
+    bitRate: Int,
+    complexity: Int,
+    cbr: Boolean
+  ): Int
 
   /** Runs [block] synchronously on the worker thread that owns the Endpoint. */
   private fun <T> exec(block: () -> T): T {
@@ -192,7 +202,22 @@ class SipEngine(private val appContext: Context) {
     cfg.logConfig.writer = logWriter
     cfg.uaConfig.userAgent = "StationCast-Radio"
     cfg.uaConfig.maxCalls = 2L
+    cfg.medConfig.clockRate = 48000L
+    cfg.medConfig.sndClockRate = 48000L
+    cfg.medConfig.quality = 10L
+    // Mobile links are bursty; a larger adaptive jitter buffer avoids
+    // robotic/PLC artifacts at the cost of a little latency.
+    cfg.medConfig.jbInit = 200
+    cfg.medConfig.jbMinPre = 100
+    cfg.medConfig.jbMaxPre = 400
+    cfg.medConfig.jbMax = 500
     endpoint.libInit(cfg)
+    try {
+      val rc = nativeInitOpus(48000, 64000, 6, false)
+      Log.i(TAG, "Opus 48kHz broadcast codec registered (rc=$rc)")
+    } catch (t: Throwable) {
+      Log.e(TAG, "nativeInitOpus failed: ${t.message}")
+    }
     val udp = TransportConfig()
     udp.qosType = pj_qos_type.PJ_QOS_TYPE_VOICE
     endpoint.transportCreate(pjsip_transport_type_e.PJSIP_TRANSPORT_UDP, udp)
@@ -219,23 +244,28 @@ class SipEngine(private val appContext: Context) {
     }
   }
 
-  private fun codecLabel(codec: String?): String = when (codec) {
-    "opus" -> "OPUS"
+  private fun codecLabel(codec: String?): String = when (codec?.lowercase()) {
+    "g722" -> "G.722"
     "pcmu" -> "G.711"
     "pcma" -> "G.711"
-    else -> "G.722" // g722 (EBU 3326 default)
+    else -> "OPUS" // 48kHz Fullband Opus broadcast default
   }
 
-  /** Endpoint-wide codec priorities; preferred codec first, G.722 always on. */
+  /** Endpoint-wide codec priorities; preferred codec first, Opus & G.722 available. */
   private fun applyCodecPriorities() {
     val endpoint = ep ?: return
     try {
-      for (ci in endpoint.codecEnum2()) endpoint.codecSetPriority(ci.codecId, 0)
+      val available = mutableListOf<String>()
+      for (ci in endpoint.codecEnum2()) {
+        available.add(ci.codecId)
+        endpoint.codecSetPriority(ci.codecId, 0)
+      }
+      Log.i(TAG, "Available PJSIP codecs: $available (preferred=$currentCodec)")
       var prio: Short = 254
       val wanted = when (currentCodec) {
-        "OPUS" -> listOf("opus/48000", "G722/16000", "PCMA/8000", "PCMU/8000")
-        "G.711" -> listOf("PCMU/8000", "PCMA/8000", "G722/16000")
-        else -> listOf("G722/16000", "opus/48000", "PCMA/8000", "PCMU/8000")
+        "OPUS" -> listOf("opus/48000/2", "opus/48000", "G722/16000/1", "G722/16000", "PCMA/8000/1", "PCMU/8000/1")
+        "G.711" -> listOf("PCMU/8000/1", "PCMU/8000", "PCMA/8000/1", "PCMA/8000", "opus/48000/2", "G722/16000/1")
+        else -> listOf("G722/16000/1", "G722/16000", "opus/48000/2", "opus/48000", "PCMA/8000/1", "PCMU/8000/1")
       }
       for (id in wanted) {
         try { endpoint.codecSetPriority(id, prio); prio = (prio - 1).toShort() } catch (_: Throwable) {}
@@ -343,6 +373,22 @@ class SipEngine(private val appContext: Context) {
     levelRunnable = null
   }
 
+  private fun activeStreamCodec(): String {
+    val c = call ?: return currentCodec
+    return try {
+      val name = c.getStreamInfo(0L).codecName.uppercase()
+      when {
+        name.contains("OPUS") -> "OPUS"
+        name.contains("G722") -> "G.722"
+        name.contains("PCMU") || name.contains("PCMA") -> "G.711"
+        name.isNotEmpty() -> name
+        else -> currentCodec
+      }
+    } catch (_: Throwable) {
+      currentCodec
+    }
+  }
+
   private fun buildStats(): Map<String, Any?> {
     val (txDb, rxDb) = currentLevels()
     val (txBytes, rxBytes, rtt, jitter, lost) = getCallRtcpFull()
@@ -352,7 +398,7 @@ class SipEngine(private val appContext: Context) {
       "packetsLost" to lost,
       "txPayloadBytes" to txBytes,
       "rxPayloadBytes" to rxBytes,
-      "codec" to currentCodec,
+      "codec" to activeStreamCodec(),
       "audioLevelDb" to listOf(txDb, txDb),
       "rxAudioLevelDb" to listOf(rxDb, rxDb),
     )
@@ -398,15 +444,19 @@ class SipEngine(private val appContext: Context) {
           val s = (lo or (hi shl 8)).toShort().toInt()
           sum += (s * s).toDouble()
           n++
-          i += 8 // sample every 4th frame to limit JNI churn
+          i += 32 // sample every 16th PCM16 sample (60 samples/frame) to minimize JNI overhead
         }
         if (n == 0) return
         val rms = kotlin.math.sqrt(sum / n)
-        val dbfs = if (rms <= 0.0) -60.0 else 20.0 * kotlin.math.log10((rms + 1.0) / 32768.0)
-        val db = (dbfs + 14.0).coerceIn(-60.0, 0.0) // ~ -14 dBFS ≈ full meter
-        val prev = levelDb
-        levelDb = if (db >= prev) prev + (db - prev) * 0.7 else prev + (db - prev) * 0.12
-        Log.d(TAG, "$tag rms=$rms dbfs=${"%.1f".format(dbfs)} first=${buf.get(0)},${buf.get(1)}")
+        val norm = (rms / 32768.0).coerceIn(0.0, 1.0)
+        val dbfs = if (norm > 0.001) {
+          (20.0 * kotlin.math.log10(norm)).coerceIn(-60.0, 0.0)
+        } else {
+          -60.0
+        }
+        // Instant attack + 26 dB/s decay (0.52 dB per 20ms frame), matching AudioMeterBallistics
+        val decayed = (levelDb - 0.52).coerceAtLeast(-60.0)
+        levelDb = if (dbfs >= decayed) dbfs else decayed
       } catch (_: Throwable) {}
     }
   }
@@ -417,7 +467,7 @@ class SipEngine(private val appContext: Context) {
     try {
       val fmt = MediaFormatAudio()
       fmt.type = pjmedia_type.PJMEDIA_TYPE_AUDIO.toInt()
-      fmt.clockRate = 16000
+      fmt.clockRate = 48000
       fmt.channelCount = 1
       fmt.bitsPerSample = 16
       fmt.frameTimeUsec = 20000
@@ -442,6 +492,7 @@ class SipEngine(private val appContext: Context) {
   }
 
   private fun teardownVuTaps() {
+    configureAudioOutput(false)
     try {
       val adm = ep?.audDevManager() ?: return
       vuTx?.let {
@@ -575,6 +626,7 @@ class SipEngine(private val appContext: Context) {
               val aud = AudioMedia.typecastFromMedia(getMedia(i.toLong()))
               if (aud == null) { Log.w(TAG, "media[$i] no AudioMedia"); continue }
               val adm: AudDevManager = ep!!.audDevManager()
+              configureAudioOutput(true)
               try { aud.startTransmit(adm.playbackDevMedia) } catch (t: Throwable) { Log.w(TAG, "tx->playback: ${t.message}") }
               try { adm.captureDevMedia.startTransmit(aud) } catch (t: Throwable) { Log.w(TAG, "capture->tx: ${t.message}") }
               wireVuTaps(adm, aud)
@@ -588,7 +640,77 @@ class SipEngine(private val appContext: Context) {
     }
   }
 
+  /**
+   * Ensure Android AudioManager routes PJSIP's voice-call stream to either a
+   * connected headset (wired/USB/Bluetooth) or the main loudspeaker (instead of
+   * the quiet top earpiece) and keeps STREAM_VOICE_CALL volume audible.
+   */
+  private fun configureAudioOutput(active: Boolean) {
+    try {
+      val am = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      if (!active) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          try { am.clearCommunicationDevice() } catch (_: Throwable) {}
+        }
+        @Suppress("DEPRECATION")
+        am.isSpeakerphoneOn = false
+        am.mode = AudioManager.MODE_NORMAL
+        return
+      }
+
+      am.mode = AudioManager.MODE_IN_COMMUNICATION
+      val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+      val curVol = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+      val minTarget = (maxVol * 0.8).toInt().coerceAtLeast(1)
+      if (curVol < minTarget) {
+        am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, minTarget, 0)
+      }
+
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val devs = am.availableCommunicationDevices
+        val external = devs.firstOrNull {
+          it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+          it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+          it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+          it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+          it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+          it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        }
+        val target = external ?: devs.firstOrNull {
+          it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        }
+        if (target != null) {
+          val ok = am.setCommunicationDevice(target)
+          @Suppress("DEPRECATION")
+          am.isSpeakerphoneOn = target.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+          Log.i(TAG, "AudioManager communication device -> ${target.productName} (type=${target.type}, ok=$ok)")
+        }
+      } else {
+        @Suppress("DEPRECATION")
+        val hasHeadset = am.isWiredHeadsetOn || am.isBluetoothScoOn || am.isBluetoothA2dpOn
+        @Suppress("DEPRECATION")
+        am.isSpeakerphoneOn = !hasHeadset
+      }
+      // Some ROMs reset the mode when the communication device changes.
+      am.mode = AudioManager.MODE_IN_COMMUNICATION
+    } catch (t: Throwable) {
+      Log.w(TAG, "configureAudioOutput($active): ${t.message}")
+    }
+  }
+
   companion object {
     private const val TAG = "StationCastSip"
+
+    init {
+      try {
+        System.loadLibrary("openh264")
+      } catch (_: Throwable) {}
+      try {
+        System.loadLibrary("pjsua2")
+        System.loadLibrary("station_opus")
+      } catch (t: Throwable) {
+        Log.e(TAG, "Failed to load station_opus JNI library: ${t.message}")
+      }
+    }
   }
 }

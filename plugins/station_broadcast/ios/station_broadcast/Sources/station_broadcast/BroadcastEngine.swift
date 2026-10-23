@@ -56,6 +56,12 @@ final class BroadcastEngine {
 
     fileprivate let luminanceAnalyzer = LuminanceAnalyzer()
 
+    /// Enables/disables the luminance histogram work (only when the overlay
+    /// is actually visible) to avoid burning CPU on every camera frame.
+    func setHistogramEnabled(_ enabled: Bool) {
+        luminanceAnalyzer.isActive = enabled
+    }
+
     private var pendingVideoSettings: VideoCodecSettings?
     private var pendingAudioSettings: AudioCodecSettings?
 

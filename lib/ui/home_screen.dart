@@ -23,7 +23,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return switch (_mode) {
-      AppMode.tv => BroadcastScreen(onSwitchToRadio: () => _setMode(AppMode.radio)),
+      AppMode.tv => BroadcastScreen(
+        onSwitchToRadio: () => _setMode(AppMode.radio),
+      ),
       AppMode.radio => RadioScreen(onSwitchToTv: () => _setMode(AppMode.tv)),
     };
   }

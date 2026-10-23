@@ -72,7 +72,10 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               alignment: Alignment.topRight,
               child: TextButton(
                 onPressed: _complete,
-                child: const Text('Skip', style: TextStyle(color: Colors.white38)),
+                child: const Text(
+                  'Skip',
+                  style: TextStyle(color: Colors.white38),
+                ),
               ),
             ),
             // Slides
@@ -84,7 +87,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                   _Slide(
                     icon: Icons.settings_input_antenna,
                     title: 'Connect',
-                    subtitle: 'Enter your station\'s SRT server URL or scan\na QR code from your admin dashboard.',
+                    subtitle:
+                        'Enter your station\'s SRT server URL or scan\na QR code from your admin dashboard.',
                     animCtrl: _animCtrl,
                     page: 0,
                     currentPage: _page,
@@ -92,7 +96,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                   _Slide(
                     icon: Icons.tune,
                     title: 'Configure',
-                    subtitle: 'Set your encoder preset — balance\nquality vs latency for your network.\nChoose keyframe interval and bitrate.',
+                    subtitle:
+                        'Set your encoder preset — balance\nquality vs latency for your network.\nChoose keyframe interval and bitrate.',
                     animCtrl: _animCtrl,
                     page: 1,
                     currentPage: _page,
@@ -100,7 +105,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                   _Slide(
                     icon: Icons.fiber_manual_record,
                     title: 'Go Live',
-                    subtitle: 'Tap the red button to start streaming.\nMonitor bitrate, RTT, and dropped packets.\nReceive your return feed in the PiP window.',
+                    subtitle:
+                        'Tap the red button to start streaming.\nMonitor bitrate, RTT, and dropped packets.\nReceive your return feed in the PiP window.',
                     animCtrl: _animCtrl,
                     page: 2,
                     currentPage: _page,
@@ -125,16 +131,21 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             // Page dots
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(3, (i) => AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: _page == i ? 24 : 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _page == i ? ControlRoomColors.amber : Colors.white24,
-                  borderRadius: BorderRadius.circular(4),
+              children: List.generate(
+                3,
+                (i) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: _page == i ? 24 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _page == i
+                        ? ControlRoomColors.amber
+                        : Colors.white24,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                 ),
-              )),
+              ),
             ),
             const SizedBox(height: 32),
             // Continue button
@@ -150,7 +161,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                   onPressed: _page < 2
                       ? () => _pageCtrl.nextPage(
                           duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeOut)
+                          curve: Curves.easeOut,
+                        )
                       : _complete,
                   child: Text(
                     _page < 2 ? 'Next' : 'Start Broadcasting',

@@ -73,8 +73,8 @@ class _HistogramPainter extends CustomPainter {
       final p = i < binCount ~/ 3
           ? shadowPaint
           : i < binCount * 2 ~/ 3
-              ? midPaint
-              : highlightPaint;
+          ? midPaint
+          : highlightPaint;
       canvas.drawLine(
         Offset(i * barWidth, h),
         Offset(i * barWidth, h - barHeight),

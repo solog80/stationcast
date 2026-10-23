@@ -15,13 +15,13 @@ class HealthOverlay extends StatelessWidget {
     final bitrateColor = mbps >= 1.5
         ? ControlRoomColors.meterGreen
         : mbps >= 0.6
-            ? ControlRoomColors.amber
-            : ControlRoomColors.tallyRed;
+        ? ControlRoomColors.amber
+        : ControlRoomColors.tallyRed;
     final rttColor = stats.rttMs < 120
         ? ControlRoomColors.meterGreen
         : stats.rttMs < 300
-            ? ControlRoomColors.amber
-            : ControlRoomColors.tallyRed;
+        ? ControlRoomColors.amber
+        : ControlRoomColors.tallyRed;
     final dropColor = stats.packetsDropped == 0
         ? ControlRoomColors.meterGreen
         : ControlRoomColors.amber;
@@ -39,22 +39,22 @@ class HealthOverlay extends StatelessWidget {
   }
 
   Widget _chip(String text, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: ControlRoomColors.surface.withValues(alpha: 0.85),
-          borderRadius: BorderRadius.circular(6),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: ControlRoomColors.surface.withValues(alpha: 0.85),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 5),
-            Text(text, style: statsTextStyle),
-          ],
-        ),
-      );
+        const SizedBox(width: 5),
+        Text(text, style: statsTextStyle),
+      ],
+    ),
+  );
 }

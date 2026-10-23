@@ -1,0 +1,4 @@
+#ifndef PJ_CONFIG_SITE_H
+#define PJ_CONFIG_SITE_H
+#define PJMEDIA_AUDIO_DEV_HAS_COREAUDIO 1
+#endif

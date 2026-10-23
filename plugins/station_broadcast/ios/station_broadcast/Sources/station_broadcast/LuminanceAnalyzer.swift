@@ -6,11 +6,15 @@ final class LuminanceAnalyzer: NSObject, MediaMixerOutput {
     var videoTrackId: UInt8? { 0 }
     var audioTrackId: UInt8? { nil }
     var onHistogram: (([Int]) -> Void)?
+    /// When false the analyzer idles (no per-frame work) — mirrors Android,
+    /// where the histogram loop only runs while a listener is attached.
+    var isActive: Bool = false
 
     private var lastSendTime: CFAbsoluteTime = 0
-    private let sendInterval: CFAbsoluteTime = 0.066
+    private let sendInterval: CFAbsoluteTime = 0.25 // 4 fps, like Android
 
     func mixer(_ mixer: MediaMixer, didOutput sampleBuffer: CMSampleBuffer) {
+        guard isActive else { return }
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastSendTime >= sendInterval else { return }
         lastSendTime = now

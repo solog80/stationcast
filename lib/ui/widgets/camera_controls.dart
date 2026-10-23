@@ -59,8 +59,7 @@ class _FocusControlsSection extends StatelessWidget {
           label: 'Focus Mode',
           value: camera.focusMode,
           items: FocusMode.values,
-          onChanged: (mode) =>
-              notifier.save(camera.copyWith(focusMode: mode)),
+          onChanged: (mode) => notifier.save(camera.copyWith(focusMode: mode)),
         ),
       ],
     );
@@ -84,9 +83,8 @@ class _ExposureControlsSection extends StatelessWidget {
           min: -4,
           max: 4,
           divisions: 8,
-          onChanged: (v) => notifier.save(
-            camera.copyWith(exposureCompensation: v.round()),
-          ),
+          onChanged: (v) =>
+              notifier.save(camera.copyWith(exposureCompensation: v.round())),
         ),
       ],
     );
@@ -145,9 +143,8 @@ class _SensorControlsSection extends StatelessWidget {
           min: 100,
           max: 3200,
           divisions: 31,
-          onChanged: (v) => notifier.save(
-            camera.copyWith(isoSensitivity: v.round()),
-          ),
+          onChanged: (v) =>
+              notifier.save(camera.copyWith(isoSensitivity: v.round())),
         ),
       ],
     );
@@ -176,8 +173,7 @@ class _StabilizationControlsSection extends StatelessWidget {
           label: 'Flash Mode',
           value: camera.flashMode,
           items: FlashMode.values,
-          onChanged: (mode) =>
-              notifier.save(camera.copyWith(flashMode: mode)),
+          onChanged: (mode) => notifier.save(camera.copyWith(flashMode: mode)),
         ),
       ],
     );
@@ -185,10 +181,7 @@ class _StabilizationControlsSection extends StatelessWidget {
 }
 
 class _ExpandableSection extends StatefulWidget {
-  const _ExpandableSection({
-    required this.title,
-    required this.children,
-  });
+  const _ExpandableSection({required this.title, required this.children});
 
   final String title;
   final List<Widget> children;
@@ -225,10 +218,7 @@ class _ExpandableSectionState extends State<_ExpandableSection> {
             ],
           ),
         ),
-        if (_expanded) ...[
-          const SizedBox(height: 12),
-          ...widget.children,
-        ],
+        if (_expanded) ...[const SizedBox(height: 12), ...widget.children],
       ],
     );
   }
@@ -258,7 +248,10 @@ class _SliderControl extends StatelessWidget {
       children: [
         Text(
           '$label: ${value.toStringAsFixed(1)}',
-          style: const TextStyle(fontSize: 12, color: ControlRoomColors.textSecondary),
+          style: const TextStyle(
+            fontSize: 12,
+            color: ControlRoomColors.textSecondary,
+          ),
         ),
         const SizedBox(height: 8),
         Slider(
@@ -320,13 +313,14 @@ class _SegmentedControl<T> extends StatelessWidget {
           scrollDirection: Axis.horizontal,
           child: SegmentedButton<T>(
             selected: {value},
-            onSelectionChanged: (selection) =>
-                onChanged(selection.first),
+            onSelectionChanged: (selection) => onChanged(selection.first),
             segments: items
-                .map((item) => ButtonSegment(
-                  value: item,
-                  label: Text(_formatLabel(item.toString())),
-                ))
+                .map(
+                  (item) => ButtonSegment(
+                    value: item,
+                    label: Text(_formatLabel(item.toString())),
+                  ),
+                )
                 .toList(),
           ),
         ),

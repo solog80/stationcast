@@ -59,38 +59,38 @@ class DestinationPreset {
     String? streamKey,
     String? webrtcUrl,
     bool? isDefault,
-  }) =>
-      DestinationPreset(
-        id: id,
-        name: name ?? this.name,
-        protocol: protocol ?? this.protocol,
-        host: host ?? this.host,
-        port: port ?? this.port,
-        streamId: streamId ?? this.streamId,
-        passphrase: passphrase ?? this.passphrase,
-        latencyMs: latencyMs ?? this.latencyMs,
-        rtmpUrl: rtmpUrl ?? this.rtmpUrl,
-        streamKey: streamKey ?? this.streamKey,
-        webrtcUrl: webrtcUrl ?? this.webrtcUrl,
-        isDefault: isDefault ?? this.isDefault,
-      );
+  }) => DestinationPreset(
+    id: id,
+    name: name ?? this.name,
+    protocol: protocol ?? this.protocol,
+    host: host ?? this.host,
+    port: port ?? this.port,
+    streamId: streamId ?? this.streamId,
+    passphrase: passphrase ?? this.passphrase,
+    latencyMs: latencyMs ?? this.latencyMs,
+    rtmpUrl: rtmpUrl ?? this.rtmpUrl,
+    streamKey: streamKey ?? this.streamKey,
+    webrtcUrl: webrtcUrl ?? this.webrtcUrl,
+    isDefault: isDefault ?? this.isDefault,
+  );
 
   Map<String, Object?> toJson() => {
-        'id': id,
-        'name': name,
-        'protocol': protocol.name,
-        'host': host,
-        'port': port,
-        'streamId': streamId,
-        'passphrase': passphrase,
-        'latencyMs': latencyMs,
-        'rtmpUrl': rtmpUrl,
-        'streamKey': streamKey,
-        'webrtcUrl': webrtcUrl,
-        'isDefault': isDefault,
-      };
+    'id': id,
+    'name': name,
+    'protocol': protocol.name,
+    'host': host,
+    'port': port,
+    'streamId': streamId,
+    'passphrase': passphrase,
+    'latencyMs': latencyMs,
+    'rtmpUrl': rtmpUrl,
+    'streamKey': streamKey,
+    'webrtcUrl': webrtcUrl,
+    'isDefault': isDefault,
+  };
 
-  static DestinationPreset fromJson(Map<String, Object?> json) => DestinationPreset(
+  static DestinationPreset fromJson(Map<String, Object?> json) =>
+      DestinationPreset(
         id: '${json['id']}',
         name: '${json['name']}',
         protocol: BroadcastProtocol.values.firstWhere(

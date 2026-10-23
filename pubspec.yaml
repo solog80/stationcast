@@ -25,6 +25,10 @@ dependencies:
   station_broadcast:
     path: plugins/station_broadcast
 
+  # Networking (mesh/Supabase config sync)
+  http: ^1.2.2
+  supabase: ^2.8.0
+
   # Platform services
   shared_preferences: ^2.3.0
   wakelock_plus: ^1.2.10

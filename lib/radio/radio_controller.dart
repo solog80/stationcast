@@ -62,8 +62,12 @@ class RadioUiState {
     peer: peer ?? this.peer,
     codec: codec ?? this.codec,
     errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
-    connectedSince: clearConnectedSince ? null : (connectedSince ?? this.connectedSince),
-    ringingSince: clearRingingSince ? null : (ringingSince ?? this.ringingSince),
+    connectedSince: clearConnectedSince
+        ? null
+        : (connectedSince ?? this.connectedSince),
+    ringingSince: clearRingingSince
+        ? null
+        : (ringingSince ?? this.ringingSince),
   );
 }
 
@@ -297,7 +301,7 @@ class RadioController extends Notifier<RadioUiState> {
     if (lower.contains('auth') ||
         lower.contains('401') ||
         lower.contains('403')) {
-      return 'Registration rejected - check radio credentials';
+      return 'Registration rejected - check radio credentials ($technical)';
     } else if (lower.contains('timeout') || lower.contains('network')) {
       return 'Can\'t reach the radio server - check connection';
     } else if (lower.contains('permission') || lower.contains('mic')) {

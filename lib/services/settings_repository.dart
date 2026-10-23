@@ -25,13 +25,18 @@ class SettingsRepository {
     if (raw == null) return const [];
     final list = jsonDecode(raw) as List<dynamic>;
     return list
-        .map((e) => DestinationPreset.fromJson((e as Map).cast<String, Object?>()))
+        .map(
+          (e) => DestinationPreset.fromJson((e as Map).cast<String, Object?>()),
+        )
         .toList();
   }
 
   Future<void> savePresets(List<DestinationPreset> presets) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_presetsKey, jsonEncode(presets.map((p) => p.toJson()).toList()));
+    await prefs.setString(
+      _presetsKey,
+      jsonEncode(presets.map((p) => p.toJson()).toList()),
+    );
   }
 
   Future<String?> loadDefaultPresetId() async {
@@ -52,7 +57,9 @@ class SettingsRepository {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_encoderKey);
     if (raw == null) return const EncoderSettings();
-    return EncoderSettings.fromJson((jsonDecode(raw) as Map).cast<String, Object?>());
+    return EncoderSettings.fromJson(
+      (jsonDecode(raw) as Map).cast<String, Object?>(),
+    );
   }
 
   Future<void> saveEncoderSettings(EncoderSettings settings) async {
@@ -64,7 +71,9 @@ class SettingsRepository {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_cameraKey);
     if (raw == null) return const CameraSettings();
-    return CameraSettings.fromJson((jsonDecode(raw) as Map).cast<String, Object?>());
+    return CameraSettings.fromJson(
+      (jsonDecode(raw) as Map).cast<String, Object?>(),
+    );
   }
 
   Future<void> saveCameraSettings(CameraSettings settings) async {
@@ -76,7 +85,9 @@ class SettingsRepository {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_returnFeedKey);
     if (raw == null) return const ReturnFeedConfig();
-    return ReturnFeedConfig.fromJson((jsonDecode(raw) as Map).cast<String, Object?>());
+    return ReturnFeedConfig.fromJson(
+      (jsonDecode(raw) as Map).cast<String, Object?>(),
+    );
   }
 
   Future<void> saveReturnFeedConfig(ReturnFeedConfig config) async {
@@ -88,7 +99,9 @@ class SettingsRepository {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_recordingKey);
     if (raw == null) return const RecordingSettings();
-    return RecordingSettings.fromJson((jsonDecode(raw) as Map).cast<String, Object?>());
+    return RecordingSettings.fromJson(
+      (jsonDecode(raw) as Map).cast<String, Object?>(),
+    );
   }
 
   Future<void> saveRecordingSettings(RecordingSettings settings) async {

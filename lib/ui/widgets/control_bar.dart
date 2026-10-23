@@ -83,7 +83,10 @@ class _SlimButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scale = (MediaQuery.sizeOf(context).shortestSide / 400).clamp(0.8, 1.6);
+    final scale = (MediaQuery.sizeOf(context).shortestSide / 400).clamp(
+      0.8,
+      1.6,
+    );
     final iconSize = (20 * scale).roundToDouble();
     return Container(
       decoration: BoxDecoration(
@@ -96,7 +99,10 @@ class _SlimButton extends StatelessWidget {
         icon: Icon(icon, size: iconSize),
         color: active ? activeColor : ControlRoomColors.textPrimary,
         padding: EdgeInsets.all(6 * scale),
-        constraints: BoxConstraints(minWidth: 32 * scale, minHeight: 32 * scale),
+        constraints: BoxConstraints(
+          minWidth: 32 * scale,
+          minHeight: 32 * scale,
+        ),
         splashRadius: (16 * scale).roundToDouble(),
       ),
     );
@@ -125,7 +131,11 @@ class _GoLiveButton extends ConsumerWidget {
           ),
           child: const Text(
             'HOLD STOP',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 0.8),
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+              letterSpacing: 0.8,
+            ),
           ),
         ),
       );
@@ -141,7 +151,11 @@ class _GoLiveButton extends ConsumerWidget {
       onPressed: state.initialized ? onGoLive : null,
       child: const Text(
         'GO LIVE',
-        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: 0.8),
+        style: TextStyle(
+          fontWeight: FontWeight.w800,
+          fontSize: 13,
+          letterSpacing: 0.8,
+        ),
       ),
     );
   }
@@ -167,7 +181,10 @@ class ZoomPills extends ConsumerWidget {
               color: Colors.transparent,
               child: Container(
                 width: 260,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.black87,
                   borderRadius: BorderRadius.circular(12),
@@ -175,7 +192,10 @@ class ZoomPills extends ConsumerWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Zoom: ${currentZoom.toStringAsFixed(1)}x', style: const TextStyle(fontSize: 11)),
+                    Text(
+                      'Zoom: ${currentZoom.toStringAsFixed(1)}x',
+                      style: const TextStyle(fontSize: 11),
+                    ),
                     const SizedBox(height: 6),
                     Slider(
                       value: currentZoom.clamp(0.5, effectiveMax),
@@ -207,7 +227,9 @@ class ZoomPills extends ConsumerWidget {
     return capsAsync.when(
       data: (caps) {
         final minZoom = (caps['minZoom'] as num?)?.toDouble() ?? 1.0;
-        final switchOverPoints = (caps['switchOverPoints'] as List<dynamic>?)?.cast<double>() ?? <double>[];
+        final switchOverPoints =
+            (caps['switchOverPoints'] as List<dynamic>?)?.cast<double>() ??
+            <double>[];
         final levels = <double>[0.5, 1.0, ...switchOverPoints, 2.0];
         final unique = levels.toSet().toList()..sort();
 
@@ -220,9 +242,14 @@ class ZoomPills extends ConsumerWidget {
               onLongPress: () => _showSlider(context, ref),
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 2),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
-                  color: active ? ControlRoomColors.amber.withValues(alpha: 0.3) : Colors.white12,
+                  color: active
+                      ? ControlRoomColors.amber.withValues(alpha: 0.3)
+                      : Colors.white12,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -268,7 +295,10 @@ class _ZoomButton extends ConsumerWidget {
                   color: Colors.transparent,
                   child: Container(
                     width: 260,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black87,
                       borderRadius: BorderRadius.circular(12),
@@ -276,7 +306,10 @@ class _ZoomButton extends ConsumerWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Zoom: ${currentZoom.toStringAsFixed(1)}x', style: const TextStyle(fontSize: 11)),
+                        Text(
+                          'Zoom: ${currentZoom.toStringAsFixed(1)}x',
+                          style: const TextStyle(fontSize: 11),
+                        ),
                         const SizedBox(height: 6),
                         Slider(
                           value: currentZoom.clamp(0.5, effectiveMax),
@@ -300,14 +333,18 @@ class _ZoomButton extends ConsumerWidget {
       },
       child: Container(
         decoration: BoxDecoration(
-          color: zoom > 1.0 ? ControlRoomColors.amber.withValues(alpha: 0.2) : null,
+          color: zoom > 1.0
+              ? ControlRoomColors.amber.withValues(alpha: 0.2)
+              : null,
           borderRadius: BorderRadius.circular(8),
         ),
         child: IconButton(
           tooltip: 'Zoom',
           onPressed: null,
           icon: Icon(Icons.zoom_in, size: 20),
-          color: zoom > 1.0 ? ControlRoomColors.amber : ControlRoomColors.textPrimary,
+          color: zoom > 1.0
+              ? ControlRoomColors.amber
+              : ControlRoomColors.textPrimary,
           padding: const EdgeInsets.all(6),
           constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
           splashRadius: 16,

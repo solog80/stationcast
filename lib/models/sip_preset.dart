@@ -11,9 +11,10 @@ class SipPreset {
     this.username = '',
     this.password = '',
     this.extension = '',
-    this.codec = 'g722',
+    this.codec = 'opus',
     this.autoAnswer = false,
     this.enabled = false,
+    this.adminLocked = false,
   });
 
   final String id;
@@ -33,6 +34,10 @@ class SipPreset {
   /// Whether the radio line is configured and should register on app start.
   final bool enabled;
 
+  /// True when the station admin locked the SIP section ("Admin only"):
+  /// the device receives the settings but cannot edit them.
+  final bool adminLocked;
+
   bool get isConfigured =>
       registrarHost.isNotEmpty && username.isNotEmpty && extension.isNotEmpty;
 
@@ -47,6 +52,7 @@ class SipPreset {
     String? codec,
     bool? autoAnswer,
     bool? enabled,
+    bool? adminLocked,
   }) => SipPreset(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -58,6 +64,7 @@ class SipPreset {
     codec: codec ?? this.codec,
     autoAnswer: autoAnswer ?? this.autoAnswer,
     enabled: enabled ?? this.enabled,
+    adminLocked: adminLocked ?? this.adminLocked,
   );
 
   Map<String, Object?> toJson() => {
@@ -81,12 +88,21 @@ class SipPreset {
     username: '${json['username'] ?? ''}',
     password: '${json['password'] ?? ''}',
     extension: '${json['extension'] ?? ''}',
-    codec: '${json['codec'] ?? 'g722'}',
+    codec: '${json['codec'] ?? 'opus'}',
     autoAnswer: json['autoAnswer'] as bool? ?? false,
     enabled: json['enabled'] as bool? ?? false,
+    adminLocked: _lockedFromJson(json),
   );
 
   /// Short display target, e.g. `field@158.220.126.145:5060`.
   String get displayTarget =>
       '$username@$registrarHost:${registrarPort == 5060 ? '' : '$registrarPort'}';
+}
+
+bool _lockedFromJson(Map<String, Object?> json) {
+  final locks = json['locks'];
+  if (locks is Map) {
+    return locks['radio'] == true || locks['enabled'] == true;
+  }
+  return locks == true || json['adminLocked'] == true;
 }

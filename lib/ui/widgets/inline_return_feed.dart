@@ -32,16 +32,16 @@ class _InlineReturnFeedState extends ConsumerState<InlineReturnFeed> {
       fit: StackFit.expand,
       children: [
         _buildContent(context, state, player),
-        Positioned(
-          top: 8,
-          right: 8,
-          child: _buildMiniControls(state, ref),
-        ),
+        Positioned(top: 8, right: 8, child: _buildMiniControls(state, ref)),
       ],
     );
   }
 
-  Widget _buildContent(BuildContext context, ReturnFeedUiState state, dynamic player) {
+  Widget _buildContent(
+    BuildContext context,
+    ReturnFeedUiState state,
+    dynamic player,
+  ) {
     switch (state.playback) {
       case ReturnFeedState.idle:
         return const Center(
@@ -64,7 +64,11 @@ class _InlineReturnFeedState extends ConsumerState<InlineReturnFeed> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.warning, color: ControlRoomColors.tallyRed, size: 32),
+                Icon(
+                  Icons.warning,
+                  color: ControlRoomColors.tallyRed,
+                  size: 32,
+                ),
                 SizedBox(height: 8),
                 Text(
                   'FEED LOST',

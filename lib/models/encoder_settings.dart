@@ -66,7 +66,8 @@ class EncoderSettings {
     mirrorFrontCamera: mirrorFrontCamera ?? this.mirrorFrontCamera,
     recording: recording ?? this.recording,
     oledPowerSaverEnabled: oledPowerSaverEnabled ?? this.oledPowerSaverEnabled,
-    oledPowerSaverTimeoutSeconds: oledPowerSaverTimeoutSeconds ?? this.oledPowerSaverTimeoutSeconds,
+    oledPowerSaverTimeoutSeconds:
+        oledPowerSaverTimeoutSeconds ?? this.oledPowerSaverTimeoutSeconds,
   );
 
   Map<String, Object?> toJson() => {
@@ -98,6 +99,7 @@ class EncoderSettings {
         ? RecordingSettings.fromJson(json['recording'] as Map<String, Object?>)
         : const RecordingSettings(),
     oledPowerSaverEnabled: (json['oledPowerSaverEnabled'] as bool?) ?? true,
-    oledPowerSaverTimeoutSeconds: (json['oledPowerSaverTimeoutSeconds'] as num?)?.toInt() ?? 15,
+    oledPowerSaverTimeoutSeconds:
+        (json['oledPowerSaverTimeoutSeconds'] as num?)?.toInt() ?? 15,
   );
 }

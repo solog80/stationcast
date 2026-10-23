@@ -73,22 +73,21 @@ class RecordingSettings {
     RecordingFps? fps,
     BroadcastVideoCodec? codec,
     bool? enabled,
-  }) =>
-      RecordingSettings(
-        resolution: resolution ?? this.resolution,
-        bitrateBps: bitrateBps ?? this.bitrateBps,
-        fps: fps ?? this.fps,
-        codec: codec ?? this.codec,
-        enabled: enabled ?? this.enabled,
-      );
+  }) => RecordingSettings(
+    resolution: resolution ?? this.resolution,
+    bitrateBps: bitrateBps ?? this.bitrateBps,
+    fps: fps ?? this.fps,
+    codec: codec ?? this.codec,
+    enabled: enabled ?? this.enabled,
+  );
 
   Map<String, Object?> toJson() => {
-        'resolution': resolution.name,
-        'bitrateBps': bitrateBps,
-        'fps': fps.name,
-        'codec': codec.name,
-        'enabled': enabled,
-      };
+    'resolution': resolution.name,
+    'bitrateBps': bitrateBps,
+    'fps': fps.name,
+    'codec': codec.name,
+    'enabled': enabled,
+  };
 
   static RecordingSettings fromJson(Map<String, Object?> json) =>
       RecordingSettings(

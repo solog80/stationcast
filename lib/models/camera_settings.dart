@@ -38,76 +38,69 @@ class CameraSettings {
     EffectMode? effectMode,
     bool? faceDetection,
     bool? mirrorFrontCamera,
-  }) =>
-      CameraSettings(
-        zoom: zoom ?? this.zoom,
-        focusMode: focusMode ?? this.focusMode,
-        exposureCompensation: exposureCompensation ?? this.exposureCompensation,
-        whiteBalance: whiteBalance ?? this.whiteBalance,
-        isoSensitivity: isoSensitivity ?? this.isoSensitivity,
-        videoStabilization: videoStabilization ?? this.videoStabilization,
-        flashMode: flashMode ?? this.flashMode,
-        sceneMode: sceneMode ?? this.sceneMode,
-        effectMode: effectMode ?? this.effectMode,
-        faceDetection: faceDetection ?? this.faceDetection,
-        mirrorFrontCamera: mirrorFrontCamera ?? this.mirrorFrontCamera,
-      );
+  }) => CameraSettings(
+    zoom: zoom ?? this.zoom,
+    focusMode: focusMode ?? this.focusMode,
+    exposureCompensation: exposureCompensation ?? this.exposureCompensation,
+    whiteBalance: whiteBalance ?? this.whiteBalance,
+    isoSensitivity: isoSensitivity ?? this.isoSensitivity,
+    videoStabilization: videoStabilization ?? this.videoStabilization,
+    flashMode: flashMode ?? this.flashMode,
+    sceneMode: sceneMode ?? this.sceneMode,
+    effectMode: effectMode ?? this.effectMode,
+    faceDetection: faceDetection ?? this.faceDetection,
+    mirrorFrontCamera: mirrorFrontCamera ?? this.mirrorFrontCamera,
+  );
 
   Map<String, Object?> toJson() => {
-        'zoom': zoom,
-        'focusMode': focusMode.name,
-        'exposureCompensation': exposureCompensation,
-        'whiteBalance': whiteBalance.name,
-        'isoSensitivity': isoSensitivity,
-        'videoStabilization': videoStabilization,
-        'flashMode': flashMode.name,
-        'sceneMode': sceneMode?.name,
-        'effectMode': effectMode?.name,
-        'faceDetection': faceDetection,
-        'mirrorFrontCamera': mirrorFrontCamera,
-      };
+    'zoom': zoom,
+    'focusMode': focusMode.name,
+    'exposureCompensation': exposureCompensation,
+    'whiteBalance': whiteBalance.name,
+    'isoSensitivity': isoSensitivity,
+    'videoStabilization': videoStabilization,
+    'flashMode': flashMode.name,
+    'sceneMode': sceneMode?.name,
+    'effectMode': effectMode?.name,
+    'faceDetection': faceDetection,
+    'mirrorFrontCamera': mirrorFrontCamera,
+  };
 
   static CameraSettings fromJson(Map<String, Object?> json) => CameraSettings(
-        zoom: (json['zoom'] as num?)?.toDouble() ?? 1.0,
-        focusMode: FocusMode.values.firstWhere(
-          (m) => m.name == json['focusMode'],
-          orElse: () => FocusMode.auto,
-        ),
-        exposureCompensation: (json['exposureCompensation'] as num?)?.toInt() ?? 0,
-        whiteBalance: WhiteBalanceMode.values.firstWhere(
-          (m) => m.name == json['whiteBalance'],
-          orElse: () => WhiteBalanceMode.auto,
-        ),
-        isoSensitivity: (json['isoSensitivity'] as num?)?.toInt() ?? 100,
-        videoStabilization: (json['videoStabilization'] as bool?) ?? true,
-        flashMode: FlashMode.values.firstWhere(
-          (m) => m.name == json['flashMode'],
-          orElse: () => FlashMode.off,
-        ),
-        sceneMode: json['sceneMode'] != null
-            ? SceneMode.values.firstWhere(
-                (m) => m.name == json['sceneMode'],
-                orElse: () => SceneMode.none,
-              )
-            : null,
-        effectMode: json['effectMode'] != null
-            ? EffectMode.values.firstWhere(
-                (m) => m.name == json['effectMode'],
-                orElse: () => EffectMode.none,
-              )
-            : null,
-        faceDetection: (json['faceDetection'] as bool?) ?? false,
-        mirrorFrontCamera: (json['mirrorFrontCamera'] as bool?) ?? false,
-      );
+    zoom: (json['zoom'] as num?)?.toDouble() ?? 1.0,
+    focusMode: FocusMode.values.firstWhere(
+      (m) => m.name == json['focusMode'],
+      orElse: () => FocusMode.auto,
+    ),
+    exposureCompensation: (json['exposureCompensation'] as num?)?.toInt() ?? 0,
+    whiteBalance: WhiteBalanceMode.values.firstWhere(
+      (m) => m.name == json['whiteBalance'],
+      orElse: () => WhiteBalanceMode.auto,
+    ),
+    isoSensitivity: (json['isoSensitivity'] as num?)?.toInt() ?? 100,
+    videoStabilization: (json['videoStabilization'] as bool?) ?? true,
+    flashMode: FlashMode.values.firstWhere(
+      (m) => m.name == json['flashMode'],
+      orElse: () => FlashMode.off,
+    ),
+    sceneMode: json['sceneMode'] != null
+        ? SceneMode.values.firstWhere(
+            (m) => m.name == json['sceneMode'],
+            orElse: () => SceneMode.none,
+          )
+        : null,
+    effectMode: json['effectMode'] != null
+        ? EffectMode.values.firstWhere(
+            (m) => m.name == json['effectMode'],
+            orElse: () => EffectMode.none,
+          )
+        : null,
+    faceDetection: (json['faceDetection'] as bool?) ?? false,
+    mirrorFrontCamera: (json['mirrorFrontCamera'] as bool?) ?? false,
+  );
 }
 
-enum FocusMode {
-  auto,
-  continuous,
-  manual,
-  macro,
-  infinity,
-}
+enum FocusMode { auto, continuous, manual, macro, infinity }
 
 enum WhiteBalanceMode {
   auto,
@@ -120,12 +113,7 @@ enum WhiteBalanceMode {
   shade,
 }
 
-enum FlashMode {
-  off,
-  on,
-  auto,
-  torch,
-}
+enum FlashMode { off, on, auto, torch }
 
 enum SceneMode {
   none,

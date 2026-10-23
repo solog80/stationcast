@@ -19,6 +19,7 @@ class ReturnFeedConfig {
     this.talkbackPassphrase = '',
     this.broadcasterId = '',
     this.broadcasterName = '',
+    this.lockedSections = const <String>[],
   });
 
   final String url;
@@ -43,6 +44,11 @@ class ReturnFeedConfig {
   final String broadcasterId;
   final String broadcasterName;
 
+  /// Settings sections the station admin has locked ("admin only"):
+  /// broadcaster, returnFeed, talkback, encoder, recording, destinations.
+  /// Devices apply remote values and the BFF rejects device writes to them.
+  final List<String> lockedSections;
+
   ReturnFeedConfig copyWith({
     String? url,
     int? latencyMs,
@@ -58,42 +64,44 @@ class ReturnFeedConfig {
     String? talkbackPassphrase,
     String? broadcasterId,
     String? broadcasterName,
-  }) =>
-      ReturnFeedConfig(
-        url: url ?? this.url,
-        latencyMs: latencyMs ?? this.latencyMs,
-        backend: backend ?? this.backend,
-        autoplayOnLive: autoplayOnLive ?? this.autoplayOnLive,
-        startMuted: startMuted ?? this.startMuted,
-        srtPassphrase: srtPassphrase ?? this.srtPassphrase,
-        srtSenderMode: srtSenderMode ?? this.srtSenderMode,
-        maxHeight: maxHeight ?? this.maxHeight,
-        talkbackEnabled: talkbackEnabled ?? this.talkbackEnabled,
-        talkbackUrl: talkbackUrl ?? this.talkbackUrl,
-        talkbackLatencyMs: talkbackLatencyMs ?? this.talkbackLatencyMs,
-        talkbackPassphrase: talkbackPassphrase ?? this.talkbackPassphrase,
-        broadcasterId: broadcasterId ?? this.broadcasterId,
-        broadcasterName: broadcasterName ?? this.broadcasterName,
-      );
+    List<String>? lockedSections,
+  }) => ReturnFeedConfig(
+    url: url ?? this.url,
+    latencyMs: latencyMs ?? this.latencyMs,
+    backend: backend ?? this.backend,
+    autoplayOnLive: autoplayOnLive ?? this.autoplayOnLive,
+    startMuted: startMuted ?? this.startMuted,
+    srtPassphrase: srtPassphrase ?? this.srtPassphrase,
+    srtSenderMode: srtSenderMode ?? this.srtSenderMode,
+    maxHeight: maxHeight ?? this.maxHeight,
+    talkbackEnabled: talkbackEnabled ?? this.talkbackEnabled,
+    talkbackUrl: talkbackUrl ?? this.talkbackUrl,
+    talkbackLatencyMs: talkbackLatencyMs ?? this.talkbackLatencyMs,
+    talkbackPassphrase: talkbackPassphrase ?? this.talkbackPassphrase,
+    broadcasterId: broadcasterId ?? this.broadcasterId,
+    broadcasterName: broadcasterName ?? this.broadcasterName,
+    lockedSections: lockedSections ?? this.lockedSections,
+  );
 
   Map<String, Object?> toJson() => {
-        'url': url,
-        'latencyMs': latencyMs,
-        'backend': backend.name,
-        'autoplayOnLive': autoplayOnLive,
-        'startMuted': startMuted,
-        'srtPassphrase': srtPassphrase,
-        'srtSenderMode': srtSenderMode.name,
-        'maxHeight': maxHeight,
-        'talkbackEnabled': talkbackEnabled,
-        'talkbackUrl': talkbackUrl,
-        'talkbackLatencyMs': talkbackLatencyMs,
-        'talkbackPassphrase': talkbackPassphrase,
-        'broadcasterId': broadcasterId,
-        'broadcasterName': broadcasterName,
-      };
+    'url': url,
+    'latencyMs': latencyMs,
+    'backend': backend.name,
+    'autoplayOnLive': autoplayOnLive,
+    'startMuted': startMuted,
+    'srtPassphrase': srtPassphrase,
+    'srtSenderMode': srtSenderMode.name,
+    'maxHeight': maxHeight,
+    'talkbackEnabled': talkbackEnabled,
+    'talkbackUrl': talkbackUrl,
+    'talkbackLatencyMs': talkbackLatencyMs,
+    'talkbackPassphrase': talkbackPassphrase,
+    'broadcasterId': broadcasterId,
+    'broadcasterName': broadcasterName,
+  };
 
-  static ReturnFeedConfig fromJson(Map<String, Object?> json) => ReturnFeedConfig(
+  static ReturnFeedConfig fromJson(Map<String, Object?> json) =>
+      ReturnFeedConfig(
         url: json['url'] as String? ?? 'srt://salttelevision.com:8011',
         latencyMs: (json['latencyMs'] as num?)?.toInt() ?? 1000,
         backend: ReturnFeedBackend.values.firstWhere(

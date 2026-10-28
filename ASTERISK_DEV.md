@@ -44,7 +44,9 @@ sudo docker start asterisk
 
 - Dev `station` and `field` endpoint secrets were **rotated**, so production
   SIP credentials cannot register against the dev SIP port.
-- Stored on the server: `/opt/asterisk-dev/creds.env` (mode 600).
+- Stored on the server: `/opt/asterisk-dev/presenters.env` (mode 600).
+  Add lines with `asterisk-dev/add_presenters.py`; the full generator rotates
+  every existing presenter password.
 - AMI: user `stationcast-dev`, secret in `/opt/asterisk-dev/ami.secret`
   (mode 600). AMI is published only on `127.0.0.1:5039`.
 - Access AMI over an SSH tunnel:
@@ -92,7 +94,7 @@ to use `5060` and are unaffected.
 
 - `5062/udp` is currently reachable from the internet (like live `5060`).
   Restrict it with firewall rules during testing if no remote softphones need it.
-- Dev uses separate secrets; do not copy `/opt/asterisk-dev/creds.env` into git.
+- Dev uses separate secrets; do not copy `/opt/asterisk-dev/presenters.env` into git.
 - AMI is read/write `all` for the dev user. It is bound to localhost and only
   intended for the control service via a tunnel/private network.
 

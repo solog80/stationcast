@@ -37,11 +37,14 @@ container on Edge2:
 
 - Live config backup: `/opt/asterisk-backups/asterisk-etc-2026-10-22-105633.tgz`
   (plus container inspect, dialplan, endpoints).
-- Dev endpoint secrets are rotated; stored in `/opt/asterisk-dev/creds.env`.
+- Dev endpoint secrets are stored in `/opt/asterisk-dev/presenters.env`.
+  `generate_pjsip_presenters.py` rotates a fresh set; `add_presenters.py`
+  appends missing lines without rotating existing passwords.
 - AMI user `stationcast-dev`; secret in `/opt/asterisk-dev/ami.secret`.
 - Full runbook: `ASTERISK_DEV.md`.
 - ConfBridge room `7000` is configured and verified in dev:
-  - endpoints `presenter1..3` (`2001..2003`)
+  - endpoints `presenter1..10` (`2001..2010`); `presenter4` is the field
+    Comrex, `presenter5..10` are spare lines
   - profiles `presenters_bridge` / `presenters_user`
   - AMI list/mute/unmute verified
   - two real phones joined room 7000; mix-minus and mute/unmute confirmed
@@ -49,7 +52,7 @@ container on Edge2:
     connects/disconnects the Comrex leg via BFF -> AMI (shared control key,
     admin role only)
   - AMI exposed to the BFF over the tailnet at `100.82.159.75:5039`
-  - remaining: Comrex leg in the room, app conference target
+  - Comrex leg joins the room; app presenter directory reads the BFF roster
 - Promote dev -> live only after testing, with a fresh backup.
 
 ## Recommended topology

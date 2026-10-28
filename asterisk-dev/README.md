@@ -8,7 +8,8 @@ details.
 
 - `confbridge-presenters.conf` — `presenters_bridge` / `presenters_user` profiles.
 - `extensions-presenters.conf` — `[presenters]` context: room `7000`, legacy dial `100` (app), test dial `7100`.
-- `generate_pjsip_presenters.py` — writes presenter endpoints + credentials.
+- `generate_pjsip_presenters.py` — writes a fresh presenter set + credentials (rotates).
+- `add_presenters.py` — appends missing presenter lines without rotating existing passwords.
 - `ami_presenters.py` — dev helper: list / mute / unmute participants via AMI.
 
 ## Apply to dev
@@ -19,7 +20,7 @@ ssh Edge2 'sudo bash -s' <<'EOF'
 install -m 640 /tmp/asterisk-dev-files/confbridge-presenters.conf /opt/asterisk-dev/etc/
 install -m 640 /tmp/asterisk-dev-files/extensions-presenters.conf /opt/asterisk-dev/etc/
 install -m 750 /tmp/asterisk-dev-files/generate_pjsip_presenters.py /opt/asterisk-dev/
-python3 /opt/asterisk-dev/generate_pjsip_presenters.py --count 3
+python3 /opt/asterisk-dev/generate_pjsip_presenters.py --count 10
 
 for f in pjsip.conf extensions.conf confbridge.conf; do
   inc="#include ${f%.conf}-presenters.conf"
@@ -38,6 +39,28 @@ EOF
 
 Credentials: `/opt/asterisk-dev/presenters.env` (mode 600). Passwords are never
 printed by the generator.
+
+## Add more presenter lines
+
+Do **not** re-run `generate_pjsip_presenters.py` to add lines: it rewrites the
+whole set and rotates every existing password. Use `add_presenters.py`, which
+only appends missing endpoints and credentials:
+
+```
+scp asterisk-dev/add_presenters.py Edge2:/tmp/
+ssh Edge2 'sudo bash -s' <<'EOF'
+install -m 750 -o 1000 -g 1000 /tmp/add_presenters.py /opt/asterisk-dev/
+python3 /opt/asterisk-dev/add_presenters.py --upto 10
+chown 1000:1000 /opt/asterisk-dev/etc/pjsip-presenters.conf /opt/asterisk-dev/presenters.env
+chmod 640 /opt/asterisk-dev/etc/pjsip-presenters.conf
+chmod 600 /opt/asterisk-dev/presenters.env
+docker exec asterisk-dev asterisk -rx "pjsip reload"
+EOF
+```
+
+Current dev layout: `presenter1..10` use `2001..2010`; `presenter4` is the
+field Comrex (`Field Comrex`). `presenter5..10` are spare lines for additional
+phones/field kits. Use `--start 11 --upto N` for later additions.
 
 ### Permissions gotcha
 
@@ -106,7 +129,8 @@ shared `RADIO_CONTROL_KEY`. The BFF reaches AMI over the tailnet.
 
 ## Verified on dev (2026-10-22)
 
-- `presenter1..3` endpoints loaded (`2001..2003`).
+- `presenter1..10` endpoints loaded (`2001..2010`); `presenter4` is the field
+  Comrex. Existing credentials were preserved when `presenter5..10` were added.
 - Dialplan `7000` and `7100` loaded.
 - `ConfBridge(presenters,presenters_bridge,presenters_user)` accepts joins.
 - AMI `ConfbridgeList` shows participants; `ConfbridgeMute` / `ConfbridgeUnmute`

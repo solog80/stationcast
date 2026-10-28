@@ -21,7 +21,6 @@ class CameraPreviewPlatformView(
             streampackSurfaceView.setSurfaceLifecycle(SurfaceView.SURFACE_LIFECYCLE_FOLLOWS_ATTACHMENT)
         }
 
-        streampackSurfaceView.setZOrderMediaOverlay(true)
 
         streampackSurfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {

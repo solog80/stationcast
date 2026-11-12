@@ -55,6 +55,8 @@ final class BroadcastEngine {
     var onRecording: ((String, String?) -> Void)?
 
     fileprivate let luminanceAnalyzer = LuminanceAnalyzer()
+    fileprivate let audioLevelAnalyzer = AudioLevelAnalyzer()
+    private var latestAudioLevels: [Double] = [-60, -60]
 
     /// Enables/disables the luminance histogram work (only when the overlay
     /// is actually visible) to avoid burning CPU on every camera frame.
@@ -146,6 +148,14 @@ final class BroadcastEngine {
             luminanceAnalyzer.onHistogram = { [weak self] bins in
                 self?.onHistogram?(bins)
             }
+            audioLevelAnalyzer.onLevels = { [weak self] levels in
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    self.latestAudioLevels = levels
+                    self.onStats?(["audioLevelDb": levels])
+                }
+            }
+            await mixer.addOutput(audioLevelAnalyzer)
             isMixerRunning = true
             setupOrientationObserver()
         } else {
@@ -720,7 +730,7 @@ final class BroadcastEngine {
                 "packetsDropped": Int(perf.pktSndDropTotal),
                 "packetsRetransmitted": Int(perf.pktRetransTotal),
                 "bandwidthMbps": perf.mbpsSendRate,
-                "audioLevelDb": nil,
+                "audioLevelDb": latestAudioLevels,
             ])
         }
     }

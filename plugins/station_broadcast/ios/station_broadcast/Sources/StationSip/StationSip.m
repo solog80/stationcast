@@ -3,9 +3,18 @@
 #import <AVFoundation/AVFoundation.h>
 #import <UIKit/UIKit.h>
 #import <pjsua-lib/pjsua.h>
+#import <pjmedia-codec/opus.h>
+
+// Declared before the PJSIP C callbacks so sip_on_call_media_state can call it.
+@interface StationSip (DuckingForward)
+- (void)beginDuckingOnSlot:(pjsua_conf_port_id)slot;
+@end
 
 static StationSip *gSip = nil;
 static char gLogPathBuf[1024] = {0};
+// Android uses STREAM_MUSIC at a raised media volume; give iOS speaker
+// playback equivalent headroom before the ducking attenuation is applied.
+static const float kSipRxGain = 1.5f;
 
 static void sip_file_log(NSString *msg) {
     if (gLogPathBuf[0] == 0) return;
@@ -86,6 +95,7 @@ static void sip_on_call_media_state(pjsua_call_id call_id) {
     if (gSip == nil) return;
     pjsua_call_info ci;
     if (pjsua_call_get_info(call_id, &ci) != PJ_SUCCESS) return;
+    pjsua_conf_port_id audioSlot = PJSUA_INVALID_ID;
     for (unsigned i = 0; i < ci.media_cnt; i++) {
         if (ci.media[i].type == PJMEDIA_TYPE_AUDIO &&
             ci.media[i].status == PJSUA_CALL_MEDIA_ACTIVE) {
@@ -93,11 +103,15 @@ static void sip_on_call_media_state(pjsua_call_id call_id) {
             if (slot != PJSUA_INVALID_ID) {
                 pjsua_conf_connect(slot, 0);
                 pjsua_conf_connect(0, slot);
+                audioSlot = slot;
             }
         }
     }
     __weak StationSip *weakSip = gSip;
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (audioSlot != PJSUA_INVALID_ID) {
+            [weakSip beginDuckingOnSlot:audioSlot];
+        }
         [weakSip performSelector:@selector(forceSpeaker)];
         [weakSip performSelector:@selector(startStats)];
     });
@@ -121,11 +135,16 @@ static double level_to_dbfs(unsigned level) {
 @property (nonatomic, strong) NSTimer *slowTimer;
 @property (nonatomic, assign) double txLevel;
 @property (nonatomic, assign) double rxLevel;
+@property (nonatomic, assign) pjsua_conf_port_id callSlot;
+@property (nonatomic, assign) float duckLevel;
+@property (nonatomic, assign) float lastAppliedDuckLevel;
+@property (nonatomic, assign) NSTimeInterval lastMicActiveAt;
 @property (nonatomic, assign) BOOL engineUp;
 @property (nonatomic, assign) BOOL mainThreadRegistered;
 @property (nonatomic, copy) NSString *codecPref;
 - (void)forceSpeaker;
 - (void)clearSpeakerOverride;
+- (void)updateDuckingForMicLevel:(double)micDb;
 @end
 
 @implementation StationSip
@@ -138,6 +157,10 @@ static double level_to_dbfs(unsigned level) {
         _engineUp = NO;
         _txLevel = -60.0;
         _rxLevel = -60.0;
+        _callSlot = PJSUA_INVALID_ID;
+        _duckLevel = 1.0f;
+        _lastAppliedDuckLevel = -1.0f;
+        _lastMicActiveAt = 0.0;
         _codecPref = @"OPUS";
     }
     return self;
@@ -150,14 +173,16 @@ static double level_to_dbfs(unsigned level) {
                          AVAudioSessionCategoryOptionAllowBluetooth |
                          AVAudioSessionCategoryOptionAllowBluetoothA2DP
                    error:nil];
-    [session setMode:AVAudioSessionModeVoiceChat error:nil];
+    // Use Default mode instead of VoiceChat so iOS does not apply narrow
+    // telephony voice-call EQ and aggressive noise suppression to the mic.
+    [session setMode:AVAudioSessionModeDefault error:nil];
+    [session setPreferredSampleRate:48000.0 error:nil];
+    [session setPreferredIOBufferDuration:0.02 error:nil];
     [session setActive:YES error:nil];
 }
 
-/// Force playback through the loudspeaker. PJSIP reconfigures the audio
-/// session after init, so this is also called when call media goes active.
-/// Proximity monitoring is disabled: holding the phone to the ear otherwise
-/// routes the return to the earpiece.
+/// Route playback through the loudspeaker only when no headset/external output
+/// is attached, while keeping fullband broadcast mic mode (AVAudioSessionModeDefault).
 - (void)forceSpeaker {
     dispatch_async(dispatch_get_main_queue(), ^{
         AVAudioSession *session = [AVAudioSession sharedInstance];
@@ -166,8 +191,12 @@ static double level_to_dbfs(unsigned level) {
                              AVAudioSessionCategoryOptionAllowBluetooth |
                              AVAudioSessionCategoryOptionAllowBluetoothA2DP
                        error:nil];
-        [session setMode:AVAudioSessionModeVoiceChat error:nil];
+        [session setMode:AVAudioSessionModeDefault error:nil];
+        [session setPreferredSampleRate:48000.0 error:nil];
+        [session setPreferredIOBufferDuration:0.02 error:nil];
         [session setActive:YES error:nil];
+        // Match the Android speaker path: always prefer the built-in speaker
+        // while a SIP call is active, even if a headset is connected.
         [session overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
         [UIDevice currentDevice].proximityMonitoringEnabled = NO;
     });
@@ -228,6 +257,8 @@ static pj_thread_desc gMainThreadDesc;
     medCfg.clock_rate = 48000;
     medCfg.snd_clock_rate = 48000;
     medCfg.quality = 10;
+    medCfg.ec_tail_len = 0;
+    medCfg.no_vad = PJ_TRUE;
     // Absorb mobile jitter instead of letting PLC make the audio robotic.
     medCfg.jb_init = 200;
     medCfg.jb_min_pre = 100;
@@ -238,6 +269,21 @@ static pj_thread_desc gMainThreadDesc;
     if (status != PJ_SUCCESS) {
         [self.delegate sipEvent:@"failed" peer:nil message:@"pjsua_init failed"];
         return;
+    }
+
+    pjmedia_codec_opus_config opusCfg;
+    pjmedia_codec_param opusParam;
+    pj_bzero(&opusParam, sizeof(opusParam));
+    if (pjmedia_codec_opus_get_config(&opusCfg) == PJ_SUCCESS) {
+        opusCfg.sample_rate = 48000;
+        opusCfg.channel_cnt = 1;
+        opusCfg.frm_ptime = 20;
+        opusCfg.frm_ptime_denum = 1;
+        opusCfg.bit_rate = 128000;
+        opusCfg.packet_loss = 5;
+        opusCfg.complexity = 10;
+        opusCfg.cbr = PJ_TRUE;
+        pjmedia_codec_opus_set_default_param(&opusCfg, &opusParam);
     }
 
     pjsua_transport_config tcfg;
@@ -424,6 +470,13 @@ static pj_thread_desc gMainThreadDesc;
 }
 
 - (void)handleCallDisconnected {
+    if (self.callSlot != PJSUA_INVALID_ID) {
+        pjsua_conf_adjust_rx_level(self.callSlot, 1.0f);
+    }
+    self.callSlot = PJSUA_INVALID_ID;
+    self.duckLevel = 1.0f;
+    self.lastAppliedDuckLevel = -1.0f;
+    self.lastMicActiveAt = 0.0;
     self.callId = PJSUA_INVALID_ID;
     [self clearSpeakerOverride];
     [self stopStats];
@@ -455,6 +508,10 @@ static pj_thread_desc gMainThreadDesc;
     if (self.callId == PJSUA_INVALID_ID) return;
     unsigned micTx = 0, micRx = 0, callTx = 0, callRx = 0;
     pjsua_conf_get_signal_level(0, &micTx, &micRx);
+    // Sound-device RX is the local mic feeding the bridge; sound-device TX is
+    // the playback going out to the speaker. Duck the call's RX while the mic
+    // is active so speaker bleed does not loop back into the conference.
+    [self updateDuckingForMicLevel:level_to_dbfs(micRx)];
 
     pjsua_call_info ci;
     if (pjsua_call_get_info(self.callId, &ci) == PJ_SUCCESS) {
@@ -488,6 +545,39 @@ static pj_thread_desc gMainThreadDesc;
         @"audioLevelDb": @[@(self.txLevel), @(self.txLevel)],
         @"rxAudioLevelDb": @[@(self.rxLevel), @(self.rxLevel)],
     }];
+}
+
+- (void)beginDuckingOnSlot:(pjsua_conf_port_id)slot {
+    self.callSlot = slot;
+    self.duckLevel = kSipRxGain;
+    self.lastAppliedDuckLevel = kSipRxGain;
+    self.lastMicActiveAt = 0.0;
+    pjsua_conf_adjust_rx_level(slot, kSipRxGain);
+}
+
+- (void)updateDuckingForMicLevel:(double)micDb {
+    if (self.callSlot == PJSUA_INVALID_ID) return;
+
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (micDb >= -30.0) {
+        self.lastMicActiveAt = now;
+    }
+    BOOL holding = (now - self.lastMicActiveAt) <= 0.250;
+    BOOL talking = micDb >= -38.0 && (micDb >= -30.0 || holding);
+    float target = talking ? (kSipRxGain * 0.55f) : kSipRxGain;
+
+    float next;
+    if (target < self.duckLevel) {
+        next = fmaxf(target, self.duckLevel - 0.15f);
+    } else {
+        next = fminf(target, self.duckLevel + 0.06f);
+    }
+    self.duckLevel = next;
+
+    if (fabsf(next - self.lastAppliedDuckLevel) >= 0.005f) {
+        pjsua_conf_adjust_rx_level(self.callSlot, next);
+        self.lastAppliedDuckLevel = next;
+    }
 }
 
 - (void)emitFullStats {

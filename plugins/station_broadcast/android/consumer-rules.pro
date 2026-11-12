@@ -14,3 +14,9 @@
 -keepclasseswithmembernames class * {
     native <methods>;
 }
+
+# BroadcastEngine uses reflection to set the physical microphone on StreamPack's
+# AudioRecord source. Keep the field name stable in minified builds.
+-keepclassmembers class io.github.thibaultbee.streampack.core.elements.sources.audio.audiorecord.AudioRecordSource {
+    private android.media.AudioRecord audioRecord;
+}

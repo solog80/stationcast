@@ -21,22 +21,28 @@ class BroadcastReporter {
   /// providers (ReturnFeedConfigNotifier / SipPresetNotifier).
   Future<void> ensureInit() async {}
 
+  String _documentId(String broadcasterId) =>
+      broadcasterId.isNotEmpty
+          ? broadcasterId
+          : (FirebaseAuth.instance.currentUser?.uid ?? '');
+
   Future<void> register(String broadcasterId, String broadcasterName) async {
-    if (broadcasterId.isEmpty) return;
+    final id = _documentId(broadcasterId);
+    if (id.isEmpty) return;
     await ensureInit();
     try {
       await FirebaseFirestore.instance
           .collection('broadcasts')
-          .doc(broadcasterId)
+          .doc(id)
           .set({
             'broadcasterName': broadcasterName.isNotEmpty
                 ? broadcasterName
-                : broadcasterId,
+                : id,
             'uid': FirebaseAuth.instance.currentUser?.uid,
             'isLive': false,
             'lastSeen': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
-      log('[BroadcastReporter] registered: $broadcasterId');
+      log('[BroadcastReporter] registered: $id');
     } catch (e) {
       log('[BroadcastReporter] register error: $e');
     }
@@ -54,16 +60,17 @@ class BroadcastReporter {
     bool talkbackActive = false,
     String streamUrl = '',
   }) async {
-    if (broadcasterId.isEmpty) return;
+    final id = _documentId(broadcasterId);
+    if (id.isEmpty) return;
     await ensureInit();
     try {
       await FirebaseFirestore.instance
           .collection('broadcasts')
-          .doc(broadcasterId)
+          .doc(id)
           .set({
             'broadcasterName': broadcasterName.isNotEmpty
                 ? broadcasterName
-                : broadcasterId,
+                : id,
             'isLive': isLive,
             'uptime': uptime,
             'bitrate': bitrate,
@@ -81,12 +88,13 @@ class BroadcastReporter {
   }
 
   Future<void> uploadSnapshot(String broadcasterId, Uint8List jpegBytes) async {
-    if (broadcasterId.isEmpty) return;
+    final id = _documentId(broadcasterId);
+    if (id.isEmpty) return;
     await ensureInit();
     try {
       await FirebaseFirestore.instance
           .collection('broadcasts')
-          .doc(broadcasterId)
+          .doc(id)
           .set({'snapshot': base64Encode(jpegBytes)}, SetOptions(merge: true));
     } catch (e) {
       log('[BroadcastReporter] snapshot upload error: $e');

@@ -326,8 +326,8 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 "type" to when (device.type) {
                     AudioDeviceInfo.TYPE_BUILTIN_MIC -> "builtin"
                     AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired"
-                    AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> "usb"
-                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "bluetooth"
+                    AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY -> "usb"
+                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET -> "bluetooth"
                     else -> "unknown"
                 }
             )
@@ -336,18 +336,48 @@ class StationBroadcastPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     /**
      * Routes capture to the given input device. StreamPack's microphone source
-     * follows the platform communication device on API 31+.
+     * and SipEngine follow the platform/preferred audio device.
      */
     private fun selectAudioDevice(id: String?) {
         if (id == null) return
+        sipEngine?.setPreferredAudioDeviceId(id)
+        engine.setPreferredAudioDevice(id)
         val audioManager =
             applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val selectedInput = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+                .firstOrNull { it.id.toString() == id }
+            // Built-in mic selection is handled by SipEngine (MODE_NORMAL).
+            if (selectedInput?.type == AudioDeviceInfo.TYPE_BUILTIN_MIC) return
+
             val device = audioManager.availableCommunicationDevices
                 .firstOrNull { it.id.toString() == id }
+                ?: selectedInput?.let { input ->
+                    audioManager.availableCommunicationDevices.firstOrNull {
+                        sameAudioFamily(it.type, input.type)
+                    }
+                }
+            // Input and communication-device IDs are different namespaces.
+            // Never clear the active route just because an input ID did not
+            // match an output/duplex device.
             if (device != null) {
                 audioManager.setCommunicationDevice(device)
             }
         }
+    }
+
+    private fun sameAudioFamily(a: Int, b: Int): Boolean {
+        if (a == b) return true
+        fun family(type: Int): Int = when (type) {
+            AudioDeviceInfo.TYPE_USB_DEVICE,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_USB_ACCESSORY -> 1
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> 2
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLE_HEADSET -> 3
+            else -> type
+        }
+        return family(a) == family(b)
     }
 }

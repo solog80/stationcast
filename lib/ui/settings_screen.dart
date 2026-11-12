@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:station_broadcast/station_broadcast.dart';
@@ -10,6 +12,7 @@ import '../models/recording_settings.dart';
 import '../models/return_feed_config.dart';
 import '../models/sip_preset.dart';
 import '../radio/providers.dart';
+import '../services/audio_device_selection.dart';
 import '../services/auth_service.dart';
 import '../services/broadcast_reporter.dart';
 import '../theme/control_room_theme.dart';
@@ -151,7 +154,7 @@ class SettingsScreen extends ConsumerWidget {
           CameraControlsSection(camera: camera),
           const SizedBox(height: 24),
           _sectionHeader('Audio'),
-          _AudioInputSection(),
+          const AudioInputSection(),
           const SizedBox(height: 24),
           _sectionHeader('Return feed'),
           _ReturnFeedSection(config: returnFeed),
@@ -412,42 +415,70 @@ class _PresetEditorScreenState extends State<PresetEditorScreen> {
   }
 }
 
-class _AudioInputSection extends ConsumerStatefulWidget {
+class AudioInputSection extends ConsumerStatefulWidget {
+  const AudioInputSection({super.key});
+
   @override
-  ConsumerState<_AudioInputSection> createState() => _AudioInputSectionState();
+  ConsumerState<AudioInputSection> createState() => _AudioInputSectionState();
 }
 
-class _AudioInputSectionState extends ConsumerState<_AudioInputSection> {
+class _AudioInputSectionState extends ConsumerState<AudioInputSection> {
   List<BroadcastAudioDevice>? _devices;
-  String? _selectedId;
+  Timer? _refreshTimer;
+  bool _refreshing = false;
 
   @override
   void initState() {
     super.initState();
     _loadDevices();
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _loadDevices(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  bool _sameDevices(
+    List<BroadcastAudioDevice>? previous,
+    List<BroadcastAudioDevice> next,
+  ) {
+    if (previous == null || previous.length != next.length) return false;
+    for (var i = 0; i < next.length; i++) {
+      if (previous[i].id != next[i].id ||
+          previous[i].name != next[i].name ||
+          previous[i].type != next[i].type) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _loadDevices() async {
-    final ctrl = ref.read(broadcastControllerProvider.notifier);
-    final devices = await ctrl.getAudioDevices();
-    if (mounted) {
-      setState(() {
-        _devices = devices;
-        // Auto-select external mic if available (USB or wired)
-        final external = devices.cast<BroadcastAudioDevice?>().firstWhere(
-          (d) => d!.type == 'usb' || d.type == 'wired' || d.type == 'bluetooth',
-          orElse: () => null,
-        );
-        if (external != null) {
-          _selectedId = external.id;
-          ctrl.selectAudioDevice(external.id);
-        }
-      });
+    if (_refreshing) return;
+    _refreshing = true;
+    try {
+      final devices = await ref
+          .read(broadcastControllerProvider.notifier)
+          .getAudioDevices();
+      if (!mounted) return;
+      if (!_sameDevices(_devices, devices)) {
+        setState(() => _devices = devices);
+      }
+    } catch (_) {
+      // Keep the last known device list if a refresh races device removal.
+    } finally {
+      _refreshing = false;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final selectedId = ref.watch(selectedAudioDeviceIdProvider);
     return Card(
       color: ControlRoomColors.surface,
       child: Padding(
@@ -479,7 +510,7 @@ class _AudioInputSectionState extends ConsumerState<_AudioInputSection> {
                     style: const TextStyle(fontSize: 10, color: Colors.white38),
                   ),
                   leading: Icon(
-                    _selectedId == d.id
+                    selectedId == d.id
                         ? Icons.radio_button_checked
                         : Icons.radio_button_unchecked,
                     size: 18,
@@ -487,7 +518,8 @@ class _AudioInputSectionState extends ConsumerState<_AudioInputSection> {
                   ),
                   dense: true,
                   onTap: () {
-                    setState(() => _selectedId = d.id);
+                    ref.read(selectedAudioDeviceIdProvider.notifier).state =
+                        d.id;
                     ref
                         .read(broadcastControllerProvider.notifier)
                         .selectAudioDevice(d.id);
@@ -495,7 +527,7 @@ class _AudioInputSectionState extends ConsumerState<_AudioInputSection> {
                 ),
             const SizedBox(height: 4),
             Text(
-              'Auto uses the system default mic. Select a specific device to use an external mic.',
+              'USB and wired mics are selected automatically when connected. You can still choose another device.',
               style: TextStyle(fontSize: 10, color: Colors.white38),
             ),
           ],

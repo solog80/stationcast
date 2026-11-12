@@ -90,6 +90,7 @@ class BroadcastController extends Notifier<BroadcastUiState> {
 
   StreamSubscription<BroadcastEvent>? _eventSub;
   bool _wantLive = false;
+  bool _stopping = false;
 
   StationBroadcast get _plugin => ref.read(broadcastPluginProvider);
 
@@ -149,6 +150,25 @@ class BroadcastController extends Notifier<BroadcastUiState> {
     );
   }
 
+  /// Releases camera, encoders, and foreground service when leaving the TV page.
+  Future<void> releaseEngine() async {
+    _wantLive = false;
+    try {
+      await _plugin.dispose();
+    } catch (_) {}
+    try {
+      await WakelockPlus.disable();
+    } catch (_) {}
+    state = state.copyWith(
+      initialized: false,
+      connection: BroadcastConnectionState.idle,
+      clearLiveSince: true,
+      reconnectAttempt: 0,
+      isRecording: false,
+      torchOn: false,
+    );
+  }
+
   Future<void> goLive(DestinationPreset preset) async {
     if (state.isLive || state.isBusy) return;
     _wantLive = true;
@@ -178,14 +198,22 @@ class BroadcastController extends Notifier<BroadcastUiState> {
   }
 
   Future<void> stop() async {
+    if (_stopping) return;
+    _stopping = true;
     _wantLive = false;
-    await _plugin.stopStream();
-    state = state.copyWith(
-      connection: BroadcastConnectionState.stopped,
-      clearLiveSince: true,
-      reconnectAttempt: 0,
-      isRecording: false,
-    );
+    try {
+      await _plugin.stopStream().timeout(const Duration(seconds: 8));
+    } catch (e) {
+      log('[BroadcastController] stopStream failed or timed out: $e');
+    } finally {
+      _stopping = false;
+      state = state.copyWith(
+        connection: BroadcastConnectionState.stopped,
+        clearLiveSince: true,
+        reconnectAttempt: 0,
+        isRecording: false,
+      );
+    }
   }
 
   void toggleFrameGuides() =>

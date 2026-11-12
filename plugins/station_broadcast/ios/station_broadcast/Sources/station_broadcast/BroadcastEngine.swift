@@ -685,8 +685,8 @@ final class BroadcastEngine {
                 options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .duckOthers])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
 
-            // Ensure microphone input is enabled
-            try session.setPreferredInput(nil) // Use default mic
+            // Do not reset a USB/wired mic selected by the app-wide device
+            // watcher. If nothing is preferred, iOS uses the system default.
             print("[BroadcastEngine] Audio session configured with input: \(session.availableInputs?.count ?? 0) inputs")
         } catch {
             emit("failed", "Audio session error: \(error.localizedDescription)")

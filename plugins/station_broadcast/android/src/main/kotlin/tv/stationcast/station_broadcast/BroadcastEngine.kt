@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaCodec
 import android.media.MediaFormat
@@ -52,12 +54,14 @@ class BroadcastEngine(private val context: Context) {
     var onPreviewModeChanged: ((String) -> Unit)? = null
 
     private var statsJob: Job? = null
+    private var audioLevelJob: Job? = null
     private var watchJob: Job? = null
     private var histogramJob: Job? = null
     private var isStreamingRequested = false
     private var isRecordingActive = false
     private var lastStats: Stats? = null
     private var audioProbe: AudioRecord? = null
+    private var preferredAudioDeviceId: String? = null
     private var previewSurface: android.view.Surface? = null
     var previewSurfaceView: android.view.SurfaceView? = null
     private var orientationListener: android.view.OrientationEventListener? = null
@@ -345,6 +349,7 @@ class BroadcastEngine(private val context: Context) {
                 }
             }
 
+            applyPreferredAudioDevice(0)
             startForegroundService()
             startStatsPolling(current)
             startConnectionWatch(current)
@@ -360,6 +365,7 @@ class BroadcastEngine(private val context: Context) {
         isStreamingRequested = false
         isRecordingActive = false
         statsJob?.cancel()
+        audioLevelJob?.cancel()
         watchJob?.cancel()
         webRtcJob?.cancel()
         try { webRtcSocket?.close() } catch (_: Exception) {}
@@ -470,6 +476,72 @@ class BroadcastEngine(private val context: Context) {
 
     fun setMuted(muted: Boolean) {
         streamer?.audioInput?.isMuted = muted
+    }
+
+    /** Select the physical microphone used by StreamPack's AudioRecord source. */
+    fun setPreferredAudioDevice(id: String?) {
+        preferredAudioDeviceId = id
+        applyPreferredAudioDevice(0)
+    }
+
+    private fun applyPreferredAudioDevice(attempt: Int) {
+        val id = preferredAudioDeviceId ?: return
+        if (streamer?.audioInput?.isStreamingFlow?.value != true) {
+            retryPreferredAudioDevice(attempt)
+            return
+        }
+        val source = streamer?.audioInput?.sourceFlow?.value
+        if (source == null) {
+            retryPreferredAudioDevice(attempt)
+            return
+        }
+        val record = findAudioRecord(source)
+        if (record == null) {
+            retryPreferredAudioDevice(attempt)
+            return
+        }
+        val manager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val device = manager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+            .firstOrNull { it.id.toString() == id }
+        if (device == null) {
+            android.util.Log.w("[BroadcastEngine]", "Preferred mic $id is not present")
+            return
+        }
+        // Some USB receivers (notably DJI) already become Android's routed
+        // input. Only force the route when the live AudioRecord is on another
+        // device; forcing an already-correct route can make DJI re-enumerate.
+        val routed = try { record.routedDevice } catch (_: Throwable) { null }
+        if (routed != null && routed.id == device.id) {
+            android.util.Log.i("[BroadcastEngine]", "Preferred mic already routed -> ${device.productName}")
+            return
+        }
+        val ok = record.setPreferredDevice(device)
+        android.util.Log.i("[BroadcastEngine]", "Preferred mic -> ${device.productName} (type=${device.type}, ok=$ok)")
+    }
+
+    private fun findAudioRecord(source: Any): AudioRecord? {
+        var type: Class<*>? = source.javaClass
+        while (type != null && type != Any::class.java) {
+            try {
+                val field = type.getDeclaredField("audioRecord")
+                field.isAccessible = true
+                return field.get(source) as? AudioRecord
+            } catch (_: NoSuchFieldException) {
+                type = type.superclass
+            } catch (t: Throwable) {
+                android.util.Log.w("[BroadcastEngine]", "Cannot access AudioRecord: ${t.message}")
+                return null
+            }
+        }
+        return null
+    }
+
+    private fun retryPreferredAudioDevice(attempt: Int) {
+        if (attempt >= 10) return
+        scope.launch {
+            delay(200)
+            applyPreferredAudioDevice(attempt + 1)
+        }
     }
 
     suspend fun setVideoBitrate(bps: Int) {
@@ -650,10 +722,22 @@ class BroadcastEngine(private val context: Context) {
         orientationListener?.disable()
         orientationListener = null
         isStreamingRequested = false
+        isRecordingActive = false
+        stopHistogram()
         statsJob?.cancel()
+        audioLevelJob?.cancel()
         watchJob?.cancel()
+        webRtcJob?.cancel()
+        try { webRtcSocket?.close() } catch (_: Exception) {}
+        webRtcSocket = null
+        stopAudioProbe()
         stopForegroundService()
+        cameraSource()?.let { src ->
+            runCatching { src.stopPreview() }
+        }
         streamer?.let {
+            runCatching { it.first.stopStream() }
+            runCatching { it.second.stopStream() }
             runCatching { it.stopStream() }
             runCatching { it.close() }
             runCatching { it.release() }
@@ -669,6 +753,7 @@ class BroadcastEngine(private val context: Context) {
             runCatching { it.release() }
         }
         recordingEncoder = null
+        android.util.Log.d("[BroadcastEngine]", "BroadcastEngine disposed (Camera2 + encoders released)")
     }
 
     private fun cameraSource(): ICameraSource? =
@@ -742,7 +827,20 @@ class BroadcastEngine(private val context: Context) {
             @Suppress("DEPRECATION")
             val r = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs.coerceAtLeast(4096))
-            if (r.state == AudioRecord.STATE_INITIALIZED) { r.startRecording(); audioProbe = r }
+            if (r.state == AudioRecord.STATE_INITIALIZED) {
+                // Keep the meter probe off external USB receivers (notably DJI,
+                // which resets when opened as a second capture stream). The
+                // broadcast source still uses the selected USB mic.
+                val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val builtIn = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
+                    .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+                if (builtIn != null) {
+                    val ok = r.setPreferredDevice(builtIn)
+                    android.util.Log.i("[BroadcastEngine]", "Audio probe -> ${builtIn.productName} (ok=$ok)")
+                }
+                r.startRecording()
+                audioProbe = r
+            }
         } catch (_: Exception) {}
     }
 
@@ -807,7 +905,8 @@ class BroadcastEngine(private val context: Context) {
         }
         // Audio level loop (~100ms = 10 Hz; smooth enough for the VU meter while
         // halving platform-channel traffic / CPU (heat) during streaming).
-        scope.launch {
+        audioLevelJob?.cancel()
+        audioLevelJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 val audioLevelDb = readAudioLevelDb()
                 if (audioLevelDb != null) {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../broadcast/providers.dart';
 import '../models/sip_preset.dart';
 import '../radio/radio_controller.dart';
 import '../radio/providers.dart';
@@ -35,6 +36,10 @@ class _RadioScreenState extends ConsumerState<RadioScreen> {
   }
 
   Future<void> _setUp() async {
+    // Ensure the TV/Camera engine is completely released when on the Radio screen.
+    try {
+      await ref.read(broadcastControllerProvider.notifier).releaseEngine();
+    } catch (_) {}
     final mic = await Permission.microphone.request();
     if (!mic.isGranted) {
       if (mounted) setState(() => _permissionsDenied = true);

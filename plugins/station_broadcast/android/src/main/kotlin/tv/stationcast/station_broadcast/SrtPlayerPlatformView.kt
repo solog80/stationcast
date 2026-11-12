@@ -163,14 +163,9 @@ class SrtDataSource : BaseDataSource(true) {
         return C.LENGTH_UNSET.toLong()
     }
 
-    private var totalReadCalls = 0
-    private var totalBytesRead = 0L
-
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         if (length == 0) return 0
         val sock = socket ?: throw IOException("Socket not connected")
-
-        totalReadCalls++
 
         // Drain queued data first
         var total = 0
@@ -182,20 +177,18 @@ class SrtDataSource : BaseDataSource(true) {
             chunk = byteQueue.poll()
         }
         if (total >= length) {
-            totalBytesRead += total
-            Log.i("SrtPlatform", "read#$totalReadCalls returned $total from queue (totalBytes=$totalBytesRead)")
             return total
         }
 
-        // Receive more from SRT
-        var recvOk = false
         try {
-            val t0 = System.currentTimeMillis()
             val rcvBuffer = sock.recv(PAYLOAD_SIZE)
-            val dt = System.currentTimeMillis() - t0
-            Log.i("SrtPlatform", "read#$totalReadCalls recv() got ${rcvBuffer.size} bytes in ${dt}ms")
-            recvOk = true
+            if (rcvBuffer.isEmpty()) {
+                throw IOException("SRT socket returned no data")
+            }
             val count = rcvBuffer.size / TS_PACKET_SIZE
+            if (count == 0) {
+                throw IOException("SRT socket returned a partial TS packet")
+            }
             for (i in 0 until count) {
                 val pkt = rcvBuffer.copyOfRange(i * TS_PACKET_SIZE, (i + 1) * TS_PACKET_SIZE)
                 if (total + TS_PACKET_SIZE <= length) {
@@ -205,14 +198,17 @@ class SrtDataSource : BaseDataSource(true) {
                     byteQueue.add(pkt)
                 }
             }
-            Log.i("SrtPlatform", "read#$totalReadCalls copied $total bytes from recv, queued ${count - total / TS_PACKET_SIZE} packets")
         } catch (e: Exception) {
-            Log.w("SrtPlatform", "read#$totalReadCalls recv() failed: $e")
+            try {
+                sock.close()
+            } catch (_: Exception) {
+            }
+            socket = null
+            Log.w("SrtPlatform", "SRT read failed; closing data source", e)
+            throw IOException("SRT read failed", e)
         }
 
-        totalBytesRead += total
-        Log.i("SrtPlatform", "read#$totalReadCalls returning $total (totalBytes=$totalBytesRead recvOk=$recvOk)")
-        return if (total > 0) total else 0
+        return total
     }
 
     override fun getUri(): Uri = Uri.EMPTY

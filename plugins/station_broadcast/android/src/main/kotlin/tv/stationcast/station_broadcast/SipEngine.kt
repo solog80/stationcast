@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import org.pjsip.pjsua2.Account
 import org.pjsip.pjsua2.AccountConfig
@@ -71,6 +72,11 @@ class SipEngine(private val appContext: Context) {
   private var account: RadioAccount? = null
   private var call: RadioCall? = null
   private var currentCodec: String = "OPUS"
+  @Volatile private var preferredAudioDeviceId: String? = null
+  private var callAudioMedia: AudioMedia? = null
+  private var duckLevel = 1.0f
+  private var lastAppliedDuckLevel = -1.0f
+  private var lastMicActiveAt = 0L
   private var statsRunnable: Runnable? = null
   private var levelRunnable: Runnable? = null
   private val errorCodeOk = 0
@@ -205,6 +211,10 @@ class SipEngine(private val appContext: Context) {
     cfg.medConfig.clockRate = 48000L
     cfg.medConfig.sndClockRate = 48000L
     cfg.medConfig.quality = 10L
+    // Disable PJSIP software echo canceller/noise suppressor and VAD so vocal
+    // harmonics are not colored by telephony voice processing.
+    cfg.medConfig.ecTailLen = 0L
+    cfg.medConfig.noVad = true
     // Mobile links are bursty; a larger adaptive jitter buffer avoids
     // robotic/PLC artifacts at the cost of a little latency.
     cfg.medConfig.jbInit = 200
@@ -213,8 +223,8 @@ class SipEngine(private val appContext: Context) {
     cfg.medConfig.jbMax = 500
     endpoint.libInit(cfg)
     try {
-      val rc = nativeInitOpus(48000, 64000, 6, false)
-      Log.i(TAG, "Opus 48kHz broadcast codec registered (rc=$rc)")
+      val rc = nativeInitOpus(48000, 128000, 10, true)
+      Log.i(TAG, "Opus 48kHz 128kbps Fullband CELT broadcast codec registered (rc=$rc)")
     } catch (t: Throwable) {
       Log.e(TAG, "nativeInitOpus failed: ${t.message}")
     }
@@ -355,6 +365,7 @@ class SipEngine(private val appContext: Context) {
     val level = object : Runnable {
       override fun run() {
         if (call == null || !isInitialized) return
+        applyDucking()
         val partial = levelPartial()
         mainHandler.post { listener?.onStats(partial) }
         workerHandler.postDelayed(this, 66)
@@ -492,6 +503,7 @@ class SipEngine(private val appContext: Context) {
   }
 
   private fun teardownVuTaps() {
+    resetDucking()
     configureAudioOutput(false)
     try {
       val adm = ep?.audDevManager() ?: return
@@ -514,6 +526,49 @@ class SipEngine(private val appContext: Context) {
     val tx = vuTx?.levelDb ?: -60.0
     val rx = vuRx?.levelDb ?: -60.0
     return Pair(tx, rx)
+  }
+
+  /**
+   * Lower the call's RX level (what we hear) while the local mic is active.
+   * The call's TX path is untouched, so the studio still receives the full mic.
+   */
+  private fun applyDucking() {
+    val audio = callAudioMedia ?: return
+    val micDb = vuTx?.levelDb ?: -60.0
+    val now = SystemClock.elapsedRealtime()
+
+    if (micDb >= DUCK_START_DB) {
+      lastMicActiveAt = now
+    }
+    val holding = now - lastMicActiveAt <= DUCK_HOLD_MS
+    val talking = micDb >= DUCK_STOP_DB && (micDb >= DUCK_START_DB || holding)
+    val target = if (talking) DUCK_LEVEL else 1.0f
+
+    val next = if (target < duckLevel) {
+      (duckLevel - DUCK_ATTACK_STEP).coerceAtLeast(target)
+    } else {
+      (duckLevel + DUCK_RELEASE_STEP).coerceAtMost(target)
+    }
+    duckLevel = next
+
+    val delta = next - lastAppliedDuckLevel
+    if (delta >= 0.005f || delta <= -0.005f) {
+      try {
+        audio.adjustRxLevel(next)
+        lastAppliedDuckLevel = next
+      } catch (t: Throwable) {
+        Log.w(TAG, "duck adjustRxLevel: ${t.message}")
+      }
+    }
+  }
+
+  private fun resetDucking() {
+    val audio = callAudioMedia
+    callAudioMedia = null
+    duckLevel = 1.0f
+    lastAppliedDuckLevel = -1.0f
+    lastMicActiveAt = 0L
+    try { audio?.adjustRxLevel(1.0f) } catch (_: Throwable) {}
   }
 
   private fun getCallRtcpFull(): Five<Long, Long, Double, Double, Int> {
@@ -625,6 +680,11 @@ class SipEngine(private val appContext: Context) {
                 mi.status == pjsua_call_media_status.PJSUA_CALL_MEDIA_ACTIVE) {
               val aud = AudioMedia.typecastFromMedia(getMedia(i.toLong()))
               if (aud == null) { Log.w(TAG, "media[$i] no AudioMedia"); continue }
+              callAudioMedia = aud
+              duckLevel = 1.0f
+              lastAppliedDuckLevel = -1.0f
+              lastMicActiveAt = 0L
+              try { aud.adjustRxLevel(1.0f) } catch (_: Throwable) {}
               val adm: AudDevManager = ep!!.audDevManager()
               configureAudioOutput(true)
               try { aud.startTransmit(adm.playbackDevMedia) } catch (t: Throwable) { Log.w(TAG, "tx->playback: ${t.message}") }
@@ -640,10 +700,22 @@ class SipEngine(private val appContext: Context) {
     }
   }
 
+  fun setPreferredAudioDeviceId(id: String?) {
+    preferredAudioDeviceId = id
+    if (call != null) {
+      configureAudioOutput(true)
+    }
+  }
+
   /**
-   * Ensure Android AudioManager routes PJSIP's voice-call stream to either a
-   * connected headset (wired/USB/Bluetooth) or the main loudspeaker (instead of
-   * the quiet top earpiece) and keeps STREAM_VOICE_CALL volume audible.
+   * Configure Android AudioManager for fullband broadcast capture & playback.
+   *
+   * OpenSL ES now uses SL_ANDROID_STREAM_MEDIA (STREAM_MUSIC) for playback and
+   * SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION for capture. Keeping the
+   * phone in MODE_NORMAL (unless a Bluetooth SCO/BLE hands-free headset is
+   * active) prevents Android/Samsung HALs from engaging telephony voice-call
+   * guard mode (l_guard_call_mode=3) and switching the microphone from the
+   * primary bottom mic (BUILTIN_MIC) to the rear camera pinhole mic (BACK_MIC).
    */
   private fun configureAudioOutput(active: Boolean) {
     try {
@@ -658,48 +730,113 @@ class SipEngine(private val appContext: Context) {
         return
       }
 
-      am.mode = AudioManager.MODE_IN_COMMUNICATION
-      val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
-      val curVol = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
-      val minTarget = (maxVol * 0.8).toInt().coerceAtLeast(1)
+      val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+      val curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+      val minTarget = (maxVol * 0.65).toInt().coerceAtLeast(1)
       if (curVol < minTarget) {
-        am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, minTarget, 0)
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, minTarget, 0)
       }
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         val devs = am.availableCommunicationDevices
-        val external = devs.firstOrNull {
-          it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
-          it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
-          it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
-          it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
-          it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
-          it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-        }
-        val target = external ?: devs.firstOrNull {
-          it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-        }
-        if (target != null) {
-          val ok = am.setCommunicationDevice(target)
+        val prefId = preferredAudioDeviceId
+        val selectedInput = if (prefId != null) {
+          am.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.id.toString() == prefId }
+        } else null
+
+        // If user explicitly selected built-in mic, keep MODE_NORMAL and clear communication device
+        if (selectedInput != null && selectedInput.type == AudioDeviceInfo.TYPE_BUILTIN_MIC) {
+          try { am.clearCommunicationDevice() } catch (_: Throwable) {}
           @Suppress("DEPRECATION")
-          am.isSpeakerphoneOn = target.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-          Log.i(TAG, "AudioManager communication device -> ${target.productName} (type=${target.type}, ok=$ok)")
+          am.isSpeakerphoneOn = false
+          am.mode = AudioManager.MODE_NORMAL
+          Log.i(TAG, "AudioManager forced to BUILTIN_MIC (${selectedInput.productName}) in MODE_NORMAL")
+          return
+        }
+
+        // If user explicitly selected an external communication device (BT/USB/Wired)
+        val explicitCommDev = if (prefId != null) {
+          devs.firstOrNull {
+            it.id.toString() == prefId ||
+            (selectedInput != null && sameAudioFamily(it.type, selectedInput.type))
+          }
+        } else null
+
+        val selectedIsBluetooth = selectedInput != null &&
+          (selectedInput.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+           selectedInput.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+
+        // USB/wired mics must not force Android into telephony/HFP mode.
+        // Keeping MODE_NORMAL preserves the media/A2DP output (e.g. Bluetooth
+        // headphones for RX) while still selecting the USB capture device.
+        if (selectedInput != null && !selectedIsBluetooth) {
+          @Suppress("DEPRECATION")
+          am.isSpeakerphoneOn = false
+          am.mode = AudioManager.MODE_NORMAL
+          if (explicitCommDev != null) {
+            val ok = am.setCommunicationDevice(explicitCommDev)
+            Log.i(TAG, "AudioManager USB/wired input -> ${explicitCommDev.productName} (type=${explicitCommDev.type}, ok=$ok, MODE_NORMAL)")
+          } else {
+            Log.w(TAG, "No communication output for ${selectedInput.productName}; keeping media route")
+          }
+          return
+        }
+
+        // Bluetooth input genuinely needs the communication/SCO path.
+        val commDev = explicitCommDev ?: if (selectedInput == null && prefId == null) {
+          devs.firstOrNull {
+            it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+          }
+        } else null
+        if (commDev != null) {
+          am.mode = AudioManager.MODE_IN_COMMUNICATION
+          val ok = am.setCommunicationDevice(commDev)
+          Log.i(TAG, "AudioManager communication device -> ${commDev.productName} (type=${commDev.type}, ok=$ok)")
+        } else if (prefId == null) {
+          try { am.clearCommunicationDevice() } catch (_: Throwable) {}
+          @Suppress("DEPRECATION")
+          am.isSpeakerphoneOn = false
+          am.mode = AudioManager.MODE_NORMAL
+          Log.i(TAG, "AudioManager set to MODE_NORMAL (broadcast media routing, primary BUILTIN_MIC)")
+        } else {
+          // Keep the current route rather than dropping the headset when the
+          // selected input has no matching communication output.
+          Log.w(TAG, "No communication device for selected input ${selectedInput?.productName}; keeping current route")
         }
       } else {
         @Suppress("DEPRECATION")
-        val hasHeadset = am.isWiredHeadsetOn || am.isBluetoothScoOn || am.isBluetoothA2dpOn
-        @Suppress("DEPRECATION")
-        am.isSpeakerphoneOn = !hasHeadset
+        am.isSpeakerphoneOn = false
+        am.mode = AudioManager.MODE_NORMAL
       }
-      // Some ROMs reset the mode when the communication device changes.
-      am.mode = AudioManager.MODE_IN_COMMUNICATION
     } catch (t: Throwable) {
       Log.w(TAG, "configureAudioOutput($active): ${t.message}")
     }
   }
 
+  private fun sameAudioFamily(a: Int, b: Int): Boolean {
+    if (a == b) return true
+    fun family(type: Int): Int = when (type) {
+      AudioDeviceInfo.TYPE_USB_DEVICE,
+      AudioDeviceInfo.TYPE_USB_HEADSET,
+      AudioDeviceInfo.TYPE_USB_ACCESSORY -> 1
+      AudioDeviceInfo.TYPE_WIRED_HEADSET,
+      AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> 2
+      AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+      AudioDeviceInfo.TYPE_BLE_HEADSET -> 3
+      else -> type
+    }
+    return family(a) == family(b)
+  }
+
   companion object {
     private const val TAG = "StationCastSip"
+    private const val DUCK_START_DB = -30.0
+    private const val DUCK_STOP_DB = -38.0
+    private const val DUCK_HOLD_MS = 250L
+    private const val DUCK_LEVEL = 0.55f
+    private const val DUCK_ATTACK_STEP = 0.15f
+    private const val DUCK_RELEASE_STEP = 0.06f
 
     init {
       try {

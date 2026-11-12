@@ -68,6 +68,21 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
     super.dispose();
   }
 
+  Future<void> _handleSwitchToRadio() async {
+    _chromeTimer?.cancel();
+    _statusTimer?.cancel();
+    _snapshotTimer?.cancel();
+    _inactivityTimer?.cancel();
+    try {
+      await ref.read(returnFeedControllerProvider.notifier).hide();
+    } catch (_) {}
+    try {
+      await ref.read(talkbackControllerProvider.notifier).stop();
+    } catch (_) {}
+    await ref.read(broadcastControllerProvider.notifier).releaseEngine();
+    widget.onSwitchToRadio?.call();
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Camera stays active for streaming; dim overlay saves OLED power
@@ -236,7 +251,7 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
 
   Future<void> _takeSnapshot() async {
     final config = ref.read(returnFeedConfigProvider).valueOrNull;
-    if (config == null || config.broadcasterId.isEmpty) return;
+    if (config == null) return;
     try {
       final bytes = await ref.read(broadcastPluginProvider).takeSnapshot();
       if (bytes != null && mounted) {
@@ -249,7 +264,7 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
 
   Future<void> _reportStatus(bool isLive, [DestinationPreset? preset]) async {
     final config = ref.read(returnFeedConfigProvider).valueOrNull;
-    if (config == null || config.broadcasterId.isEmpty) return;
+    if (config == null) return;
     final state = ref.read(broadcastControllerProvider);
     final stats = ref.read(statsProvider).valueOrNull;
     final feedState = ref.read(returnFeedControllerProvider);
@@ -345,7 +360,9 @@ class _BroadcastScreenState extends ConsumerState<BroadcastScreen>
               setState(() => _cameraSettingsOpen = !_cameraSettingsOpen),
           onGoLive: _goLive,
           onOpenSettings: _openSettings,
-          onSwitchToRadio: widget.onSwitchToRadio,
+          onSwitchToRadio: widget.onSwitchToRadio != null
+              ? _handleSwitchToRadio
+              : null,
         ),
       ),
     );

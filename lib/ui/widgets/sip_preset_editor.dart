@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/sip_preset.dart';
 import '../../radio/providers.dart';
 import '../../theme/control_room_theme.dart';
+import '../settings_screen.dart' show AudioInputSection;
 
 /// Editor for the radio line (SIP/EBU 3326) preset.
 class SipPresetEditorScreen extends ConsumerStatefulWidget {
@@ -68,15 +69,30 @@ class _SipPresetEditorScreenState extends ConsumerState<SipPresetEditorScreen> {
         ],
       ),
       body: locked
-          ? const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Radio settings are managed by your station admin.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: ControlRoomColors.textSecondary),
+          ? ListView(
+              padding: const EdgeInsets.all(16),
+              children: const [
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    'Radio line settings are managed by your station admin.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: ControlRoomColors.textSecondary),
+                  ),
                 ),
-              ),
+                SizedBox(height: 16),
+                Text(
+                  'AUDIO',
+                  style: TextStyle(
+                    color: ControlRoomColors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.4,
+                  ),
+                ),
+                SizedBox(height: 8),
+                AudioInputSection(),
+              ],
             )
           : FutureBuilder<SipPreset>(
               future: _load,
@@ -182,6 +198,18 @@ class _SipPresetEditorScreenState extends ConsumerState<SipPresetEditorScreen> {
             onChanged: (v) =>
                 setState(() => _preset = _preset.copyWith(autoAnswer: v)),
           ),
+          const SizedBox(height: 24),
+          const Text(
+            'AUDIO',
+            style: TextStyle(
+              color: ControlRoomColors.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const AudioInputSection(),
           const SizedBox(height: 20),
           const Text(
             'EBU 3326 contribution over SIP. The studio console calls this '

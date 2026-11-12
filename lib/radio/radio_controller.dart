@@ -233,6 +233,29 @@ class RadioController extends Notifier<RadioUiState> {
     );
   }
 
+  /// Fully tear down the radio side when leaving the Radio page: end the call,
+  /// unregister the SIP line, and release the wakelock.
+  Future<void> shutdown() async {
+    _dialPending = false;
+    try {
+      await _sip.hangup();
+    } catch (_) {}
+    try {
+      await _sip.unregister();
+    } catch (_) {}
+    try {
+      await WakelockPlus.disable();
+    } catch (_) {}
+    state = state.copyWith(
+      mode: RadioMode.idle,
+      clearError: true,
+      clearConnectedSince: true,
+      clearRingingSince: true,
+      peer: '',
+      codec: '',
+    );
+  }
+
   void _onSipEvent(SipCallEvent event) {
     switch (event.state) {
       case SipConnectionState.registering:

@@ -120,22 +120,20 @@ class _GoLiveButton extends ConsumerWidget {
     final controller = ref.read(broadcastControllerProvider.notifier);
 
     if (state.isLive || state.isBusy) {
-      // Long-press guard so a stray tap can't kill a live broadcast.
-      return GestureDetector(
-        onLongPress: controller.stop,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: ControlRoomColors.tallyRed,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Text(
-            'HOLD STOP',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
-              letterSpacing: 0.8,
-            ),
+      return ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: ControlRoomColors.tallyRed,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        onPressed: () => controller.stop(),
+        child: const Text(
+          'STOP',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+            letterSpacing: 0.8,
           ),
         ),
       );

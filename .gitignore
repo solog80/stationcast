@@ -64,3 +64,6 @@ tools/stationcast_ndi_bridge_go/third_party/
 tools/stationcast_ndi_bridge_go/*.dll
 
 
+
+# Local Comrex diagnostic captures
+comrex_return_*.wav

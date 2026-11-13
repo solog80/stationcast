@@ -7,41 +7,43 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../utils/log.dart';
+import 'broadcast_config_bff.dart';
 
 final broadcastReporterProvider = Provider<BroadcastReporter>((ref) {
-  final reporter = BroadcastReporter();
+  final reporter = BroadcastReporter(ref.watch(broadcastConfigBffProvider));
   ref.onDispose(() => reporter.dispose());
   return reporter;
 });
 
 class BroadcastReporter {
-  BroadcastReporter();
+  BroadcastReporter(this._bff);
+
+  final BroadcastConfigBff _bff;
 
   /// Kept for call-site compatibility; config sync moved to the mesh-backed
   /// providers (ReturnFeedConfigNotifier / SipPresetNotifier).
   Future<void> ensureInit() async {}
 
-  String _documentId(String broadcasterId) =>
-      broadcasterId.isNotEmpty
-          ? broadcasterId
-          : (FirebaseAuth.instance.currentUser?.uid ?? '');
+  String _documentId(String broadcasterId) => broadcasterId.isNotEmpty
+      ? broadcasterId
+      : (FirebaseAuth.instance.currentUser?.uid ?? '');
 
   Future<void> register(String broadcasterId, String broadcasterName) async {
     final id = _documentId(broadcasterId);
     if (id.isEmpty) return;
     await ensureInit();
     try {
-      await FirebaseFirestore.instance
-          .collection('broadcasts')
-          .doc(id)
-          .set({
-            'broadcasterName': broadcasterName.isNotEmpty
-                ? broadcasterName
-                : id,
-            'uid': FirebaseAuth.instance.currentUser?.uid,
-            'isLive': false,
-            'lastSeen': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('broadcasts').doc(id).set({
+        'broadcasterName': broadcasterName.isNotEmpty ? broadcasterName : id,
+        'uid': FirebaseAuth.instance.currentUser?.uid,
+        'isLive': false,
+        'lastSeen': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      await _bff.reportStatus({
+        'broadcasterId': id,
+        'broadcasterName': broadcasterName.isNotEmpty ? broadcasterName : id,
+        'isLive': false,
+      });
       log('[BroadcastReporter] registered: $id');
     } catch (e) {
       log('[BroadcastReporter] register error: $e');
@@ -64,24 +66,31 @@ class BroadcastReporter {
     if (id.isEmpty) return;
     await ensureInit();
     try {
-      await FirebaseFirestore.instance
-          .collection('broadcasts')
-          .doc(id)
-          .set({
-            'broadcasterName': broadcasterName.isNotEmpty
-                ? broadcasterName
-                : id,
-            'isLive': isLive,
-            'uptime': uptime,
-            'bitrate': bitrate,
-            'rttMs': rttMs,
-            'packetsDropped': packetsDropped,
-            'returnFeedUrl': returnFeedUrl,
-            'talkbackActive': talkbackActive,
-            'streamUrl': streamUrl,
-            'uid': FirebaseAuth.instance.currentUser?.uid,
-            'lastSeen': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('broadcasts').doc(id).set({
+        'broadcasterName': broadcasterName.isNotEmpty ? broadcasterName : id,
+        'isLive': isLive,
+        'uptime': uptime,
+        'bitrate': bitrate,
+        'rttMs': rttMs,
+        'packetsDropped': packetsDropped,
+        'returnFeedUrl': returnFeedUrl,
+        'talkbackActive': talkbackActive,
+        'streamUrl': streamUrl,
+        'uid': FirebaseAuth.instance.currentUser?.uid,
+        'lastSeen': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      await _bff.reportStatus({
+        'broadcasterId': id,
+        'broadcasterName': broadcasterName.isNotEmpty ? broadcasterName : id,
+        'isLive': isLive,
+        'uptime': uptime,
+        'bitrate': bitrate,
+        'rttMs': rttMs,
+        'packetsDropped': packetsDropped,
+        'returnFeedUrl': returnFeedUrl,
+        'talkbackActive': talkbackActive,
+        'streamUrl': streamUrl,
+      });
     } catch (e) {
       log('[BroadcastReporter] report error: $e');
     }
@@ -92,10 +101,9 @@ class BroadcastReporter {
     if (id.isEmpty) return;
     await ensureInit();
     try {
-      await FirebaseFirestore.instance
-          .collection('broadcasts')
-          .doc(id)
-          .set({'snapshot': base64Encode(jpegBytes)}, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('broadcasts').doc(id).set({
+        'snapshot': base64Encode(jpegBytes),
+      }, SetOptions(merge: true));
     } catch (e) {
       log('[BroadcastReporter] snapshot upload error: $e');
     }

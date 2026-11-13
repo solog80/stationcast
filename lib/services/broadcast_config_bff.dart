@@ -67,6 +67,29 @@ class BroadcastConfigBff {
 
   Future<bool> saveRadio(Map<String, Object?> radio) => _save({'radio': radio});
 
+  /// Mirrors live status into the mesh `broadcast_status` table.
+  Future<bool> reportStatus(Map<String, Object?> status) async {
+    final headers = await _authHeaders();
+    if (headers == null) return false;
+    try {
+      final res = await _client
+          .post(
+            Uri.parse('$_baseUrl/api/v1/bff/broadcast/status'),
+            headers: {...headers, 'Content-Type': 'application/json'},
+            body: jsonEncode(status),
+          )
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode != 200) {
+        log('[BffConfig] status ${res.statusCode}: ${res.body}');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      log('[BffConfig] status error: $e');
+      return false;
+    }
+  }
+
   Future<bool> _save(Map<String, Object?> patch) async {
     final headers = await _authHeaders();
     if (headers == null) return false;

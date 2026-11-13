@@ -63,6 +63,10 @@ class BroadcastEngine(private val context: Context) {
     private var audioProbe: AudioRecord? = null
     private var preferredAudioDeviceId: String? = null
     private var previewSurface: android.view.Surface? = null
+    private var attachedPreviewSurface: android.view.Surface? = null
+    private var previewAttachJob: kotlinx.coroutines.Job? = null
+    private var fixedPreviewWidth = 0
+    private var fixedPreviewHeight = 0
     var previewSurfaceView: android.view.SurfaceView? = null
     private var orientationListener: android.view.OrientationEventListener? = null
 
@@ -651,11 +655,12 @@ class BroadcastEngine(private val context: Context) {
         val sv = previewSurfaceView ?: return
         val w = if (baseWidth > 0) baseWidth else 1280
         val h = if (baseHeight > 0) baseHeight else 720
-        // Always use landscape dimensions (max x min, e.g. 1280x720) for SurfaceHolder buffer size.
-        // Camera2 outputs landscape frames; setting swapped 720x1280 forces SurfaceFlinger
-        // to stretch and squash the camera buffer horizontally and vertically.
+        // Camera2 outputs landscape frames; keep the SurfaceHolder buffer landscape.
         val targetW = kotlin.math.max(w, h)
         val targetH = kotlin.math.min(w, h)
+        if (targetW == fixedPreviewWidth && targetH == fixedPreviewHeight) return
+        fixedPreviewWidth = targetW
+        fixedPreviewHeight = targetH
         sv.post {
             try {
                 sv.holder.setFixedSize(targetW, targetH)
@@ -667,21 +672,28 @@ class BroadcastEngine(private val context: Context) {
     }
 
     fun setPreviewSurface(surface: android.view.Surface?) {
+        // surfaceChanged/surfaceCreated can fire repeatedly; reattaching an
+        // already-attached surface restarts the camera preview and can freeze it.
+        if (surface != null && surface === previewSurface && surface === attachedPreviewSurface) return
         previewSurface = surface
-        updateSurfaceFixedSize()
-        if (surface != null && surface.isValid) {
-            scope.launch {
-                val src = cameraSource()
-                if (src != null) {
-                    try {
-                        try { src.stopPreview() } catch (_: Exception) {}
-                        src.setPreview(surface)
-                        src.startPreview()
-                        android.util.Log.d("[BroadcastEngine]", "StreamPack setPreview surface succeeded (re-attached)")
-                    } catch (e: Exception) {
-                        android.util.Log.w("[BroadcastEngine]", "StreamPack setPreview surface error: ${e.message}")
-                    }
+        if (surface == null || !surface.isValid) {
+            attachedPreviewSurface = null
+            previewAttachJob?.cancel()
+            return
+        }
+        previewAttachJob?.cancel()
+        previewAttachJob = scope.launch {
+            val src = cameraSource() ?: return@launch
+            try {
+                if (attachedPreviewSurface !== surface) {
+                    try { src.stopPreview() } catch (_: Exception) {}
+                    src.setPreview(surface)
+                    src.startPreview()
+                    attachedPreviewSurface = surface
+                    android.util.Log.d("[BroadcastEngine]", "StreamPack setPreview surface succeeded (re-attached)")
                 }
+            } catch (e: Exception) {
+                android.util.Log.w("[BroadcastEngine]", "StreamPack setPreview surface error: ${e.message}")
             }
         }
     }
@@ -903,8 +915,7 @@ class BroadcastEngine(private val context: Context) {
                 delay(1000)
             }
         }
-        // Audio level loop (~100ms = 10 Hz; smooth enough for the VU meter while
-        // halving platform-channel traffic / CPU (heat) during streaming).
+        // Audio level loop (~33ms = 30 Hz) so the VU meter reacts like iOS.
         audioLevelJob?.cancel()
         audioLevelJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
@@ -912,7 +923,7 @@ class BroadcastEngine(private val context: Context) {
                 if (audioLevelDb != null) {
                     onStats?.invoke(mapOf("audioLevelDb" to audioLevelDb))
                 }
-                delay(100)
+                delay(33)
             }
         }
     }

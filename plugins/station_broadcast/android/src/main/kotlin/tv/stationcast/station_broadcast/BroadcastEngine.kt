@@ -132,7 +132,7 @@ class BroadcastEngine(private val context: Context) {
         }
 
         // Recording settings
-        val recordingEnabled = (args["recordingEnabled"] as Boolean?) ?: true
+        val recordingEnabled = (args["recordingEnabled"] as Boolean?) ?: false
         val recordingResolution = (args["recordingResolution"] as String?) ?: "p1080"
         val recordingBitrateBps = (args["recordingBitrateBps"] as Number? ?: 6_000_000).toInt()
         val recordingFps = (args["recordingFps"] as Number? ?: 25).toInt()
@@ -283,7 +283,7 @@ class BroadcastEngine(private val context: Context) {
             }
 
             // Start SECOND streamer: recording if enabled
-            val recordingEnabled = (args["recordingEnabled"] as Boolean?) ?: true
+            val recordingEnabled = (args["recordingEnabled"] as Boolean?) ?: false
             android.util.Log.d("[BroadcastEngine]", "startStream: recordingEnabled=$recordingEnabled")
 
             if (recordingEnabled) {
@@ -821,11 +821,11 @@ class BroadcastEngine(private val context: Context) {
 
     private fun initAudioProbe() {
         try {
-            val sr = 44100
+            val sr = 16000
             val bs = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             if (bs <= 0) return
             @Suppress("DEPRECATION")
-            val r = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr,
+            val r = AudioRecord(MediaRecorder.AudioSource.MIC, sr,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs.coerceAtLeast(4096))
             if (r.state == AudioRecord.STATE_INITIALIZED) {
                 // Keep the meter probe off external USB receivers (notably DJI,
@@ -903,8 +903,8 @@ class BroadcastEngine(private val context: Context) {
                 delay(1000)
             }
         }
-        // Audio level loop (~100ms = 10 Hz; smooth enough for the VU meter while
-        // halving platform-channel traffic / CPU (heat) during streaming).
+        // Audio level loop (~250ms = 4 Hz; the meter remains usable while
+        // cutting the duplicate-capture CPU/thermal cost during streaming).
         audioLevelJob?.cancel()
         audioLevelJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
@@ -912,7 +912,7 @@ class BroadcastEngine(private val context: Context) {
                 if (audioLevelDb != null) {
                     onStats?.invoke(mapOf("audioLevelDb" to audioLevelDb))
                 }
-                delay(100)
+                delay(250)
             }
         }
     }

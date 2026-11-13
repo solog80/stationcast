@@ -58,7 +58,7 @@ class RecordingSettings {
     this.bitrateBps = 6_000_000, // 6 Mbps
     this.fps = RecordingFps.fps25,
     this.codec = BroadcastVideoCodec.h264,
-    this.enabled = true,
+    this.enabled = false,
   });
 
   final RecordingResolution resolution;
@@ -104,6 +104,6 @@ class RecordingSettings {
           (c) => c.name == json['codec'],
           orElse: () => BroadcastVideoCodec.h264,
         ),
-        enabled: (json['enabled'] as bool?) ?? true,
+        enabled: (json['enabled'] as bool?) ?? false,
       );
 }

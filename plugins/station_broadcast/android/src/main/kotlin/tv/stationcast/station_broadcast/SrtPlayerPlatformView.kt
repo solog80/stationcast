@@ -12,6 +12,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -41,6 +42,7 @@ class SrtPlayerPlatformView(
     id: Int,
     url: String,
     maxHeight: Int,
+    bufferMs: Int,
     messenger: BinaryMessenger,
 ) : PlatformView, Player.Listener, MethodChannel.MethodCallHandler {
 
@@ -56,7 +58,21 @@ class SrtPlayerPlatformView(
                     .setMaxVideoSize(Int.MAX_VALUE, maxHeight)
                     .build()
             }
-            player = ExoPlayer.Builder(context).setTrackSelector(trackSelector).build()
+            val minBuffer = bufferMs.coerceAtLeast(250)
+            val playbackBuffer = (minBuffer / 2).coerceIn(250, 500)
+            val loadControl = DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    minBuffer,
+                    (minBuffer * 2).coerceAtLeast(minBuffer + 250),
+                    playbackBuffer,
+                    (playbackBuffer * 2).coerceAtLeast(500),
+                )
+                .setPrioritizeTimeOverSizeThresholds(true)
+                .build()
+            player = ExoPlayer.Builder(context)
+                .setTrackSelector(trackSelector)
+                .setLoadControl(loadControl)
+                .build()
             player.addListener(this)
             Log.i("SrtPlatform", "ExoPlayer created")
         } catch (e: Exception) {
@@ -138,7 +154,8 @@ class SrtPlayerViewFactory(
         val params = args as? Map<String, Any?>
         val url = params?.get("url") as? String ?: ""
         val maxHeight = (params?.get("maxHeight") as? Number)?.toInt() ?: 0
-        return SrtPlayerPlatformView(context, viewId, url, maxHeight, messenger)
+        val bufferMs = (params?.get("bufferMs") as? Number)?.toInt() ?: 500
+        return SrtPlayerPlatformView(context, viewId, url, maxHeight, bufferMs, messenger)
     }
 }
 

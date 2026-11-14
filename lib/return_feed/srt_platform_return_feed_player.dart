@@ -17,6 +17,7 @@ class SrtPlatformReturnFeedPlayer implements ReturnFeedPlayer {
   Timer? _playbackCheckTimer;
   bool _muted = true;
   int _maxHeight = 0;
+  int _bufferMs = 500;
 
   @override
   Future<void> open(
@@ -31,6 +32,7 @@ class SrtPlatformReturnFeedPlayer implements ReturnFeedPlayer {
     _url = _buildSrtUrl(url, latencyMs, srtPassphrase, srtSenderMode);
     _muted = muted;
     _maxHeight = maxHeight;
+    _bufferMs = latencyMs;
     log('[SrtPlatform] Built SRT URL: $_url');
     _state.add(ReturnFeedState.buffering);
 
@@ -86,7 +88,12 @@ class SrtPlatformReturnFeedPlayer implements ReturnFeedPlayer {
     final url = _url;
     if (url == null) return const SizedBox.shrink();
     log('[SrtPlatform] buildVideo called, returning NativeSrtPlayer');
-    return NativeSrtPlayer(url: url, muted: _muted, maxHeight: _maxHeight);
+    return NativeSrtPlayer(
+      url: url,
+      muted: _muted,
+      maxHeight: _maxHeight,
+      bufferMs: _bufferMs,
+    );
   }
 
   @override

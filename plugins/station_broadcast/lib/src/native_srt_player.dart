@@ -12,6 +12,7 @@ class NativeSrtPlayer extends StatefulWidget {
     required this.url,
     this.muted = true,
     this.maxHeight = 0,
+    this.bufferMs = 500,
   });
 
   final String url;
@@ -19,6 +20,9 @@ class NativeSrtPlayer extends StatefulWidget {
 
   /// Cap the decoded/rendered video height (px). 0 = full resolution.
   final int maxHeight;
+
+  /// Player-side buffer target, normally the dashboard's return-feed latency.
+  final int bufferMs;
 
   @override
   State<NativeSrtPlayer> createState() => _NativeSrtPlayerState();
@@ -43,7 +47,7 @@ class _NativeSrtPlayerState extends State<NativeSrtPlayer> {
               id: params.id,
               viewType: _viewType,
               layoutDirection: TextDirection.ltr,
-              creationParams: <String, dynamic>{'url': widget.url, 'maxHeight': widget.maxHeight},
+              creationParams: <String, dynamic>{'url': widget.url, 'maxHeight': widget.maxHeight, 'bufferMs': widget.bufferMs},
               creationParamsCodec: const StandardMessageCodec(),
             );
             controller.addOnPlatformViewCreatedListener((id) {
@@ -58,7 +62,7 @@ class _NativeSrtPlayerState extends State<NativeSrtPlayer> {
       case TargetPlatform.iOS:
         return UiKitView(
           viewType: _viewType,
-          creationParams: <String, dynamic>{'url': widget.url, 'maxHeight': widget.maxHeight},
+          creationParams: <String, dynamic>{'url': widget.url, 'maxHeight': widget.maxHeight, 'bufferMs': widget.bufferMs},
           creationParamsCodec: const StandardMessageCodec(),
           onPlatformViewCreated: (id) {
             _viewId = id;

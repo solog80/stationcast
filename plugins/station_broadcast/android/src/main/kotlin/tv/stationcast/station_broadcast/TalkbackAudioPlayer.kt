@@ -10,6 +10,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -25,18 +26,30 @@ import java.util.LinkedList
 import java.util.Queue
 
 @UnstableApi
-class TalkbackAudioPlayer(context: Context) : Player.Listener {
-    private val player = ExoPlayer.Builder(context).build()
+class TalkbackAudioPlayer(private val context: Context) : Player.Listener {
+    private var player: ExoPlayer? = null
     private var started = false
-
-    init {
-        player.addListener(this)
-    }
 
     fun start(url: String) {
         if (started) return
         started = true
         Log.i("Talkback", "start() url=$url")
+
+        val latency = Uri.parse(url).getQueryParameter("latency")?.toIntOrNull() ?: 500
+        val minBuffer = latency.coerceAtLeast(250)
+        val playbackBuffer = (minBuffer / 2).coerceIn(250, 500)
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                minBuffer,
+                (minBuffer * 2).coerceAtLeast(minBuffer + 250),
+                playbackBuffer,
+                (playbackBuffer * 2).coerceAtLeast(500),
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+        val exo = ExoPlayer.Builder(context).setLoadControl(loadControl).build()
+        player = exo
+        exo.addListener(this)
 
         val dataSourceFactory = DataSource.Factory { TalkbackSrtDataSource() }
         val extractorsFactory = ExtractorsFactory { arrayOf<TsExtractor>(TsExtractor()) }
@@ -44,9 +57,9 @@ class TalkbackAudioPlayer(context: Context) : Player.Listener {
         val mediaSource: MediaSource =
             ProgressiveMediaSource.Factory(dataSourceFactory, extractorsFactory)
                 .createMediaSource(mediaItem)
-        player.setMediaSource(mediaSource)
-        player.prepare()
-        player.playWhenReady = true
+        exo.setMediaSource(mediaSource)
+        exo.prepare()
+        exo.playWhenReady = true
         Log.i("Talkback", "ExoPlayer prepared, playWhenReady=true")
     }
 
@@ -58,9 +71,11 @@ class TalkbackAudioPlayer(context: Context) : Player.Listener {
         if (!started) return
         started = false
         Log.i("Talkback", "stop()")
-        player.removeListener(this)
-        player.stop()
-        player.release()
+        val exo = player ?: return
+        exo.removeListener(this)
+        exo.stop()
+        exo.release()
+        player = null
     }
 }
 

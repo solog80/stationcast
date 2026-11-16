@@ -121,16 +121,18 @@ final class BroadcastEngine {
         audioSettings.bitRate = audioBitrate
         pendingAudioSettings = audioSettings
 
-        // Store recording config
+        // Recording is opt-in. Always clear stale native state when disabled.
+        self.recordingEnabled = recordingEnabled
         if recordingEnabled {
-            self.recordingEnabled = recordingEnabled
             self.recordingSettings = RecordingConfig(
-                enabled: recordingEnabled,
+                enabled: true,
                 resolution: recordingResolution,
                 bitrateBps: recordingBitrateBps,
                 fps: recordingFps,
                 codec: recordingCodec
             )
+        } else {
+            self.recordingSettings = nil
         }
 
         if !isMixerRunning {
@@ -206,7 +208,8 @@ final class BroadcastEngine {
             query.append(URLQueryItem(name: "passphrase", value: passphrase))
         }
         if let latency = (args["latencyMs"] as? NSNumber)?.intValue, latency > 0 {
-            query.append(URLQueryItem(name: "latency", value: String(latency * 1000)))
+            // SRTO_LATENCY is in milliseconds (same value Android uses).
+            query.append(URLQueryItem(name: "latency", value: String(latency)))
         }
         if !query.isEmpty {
             components.queryItems = query

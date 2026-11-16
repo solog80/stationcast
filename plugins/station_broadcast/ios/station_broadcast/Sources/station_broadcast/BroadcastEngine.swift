@@ -215,7 +215,10 @@ final class BroadcastEngine {
             components.queryItems = query
         }
 
-        let connection = SRTConnection()
+        // Reuse one SRTConnection for the engine lifetime. Releasing it
+        // deinitializes libsrt globally, which races the next connection.
+        let connection = srtConnection ?? SRTConnection()
+        srtConnection = connection
         let stream = SRTStream(connection: connection)
         if let videoSettings = pendingVideoSettings {
             try? await stream.setVideoSettings(videoSettings)
@@ -230,10 +233,15 @@ final class BroadcastEngine {
             await attachRecorder(to: stream, config: config)
         }
 
-        try await connection.connect(components.url)
-        await stream.publish()
-        srtConnection = connection
-        srtStream = stream
+        do {
+            try await connection.connect(components.url)
+            await stream.publish()
+            srtStream = stream
+        } catch {
+            await mixer.removeOutput(stream)
+            await stream.close()
+            throw error
+        }
     }
 
     private func startRtmp(args: [String: Any?]) async throws {
@@ -326,9 +334,10 @@ final class BroadcastEngine {
             await mixer.removeOutput(stream)
             await stream.close()
         }
+        // Keep the SRTConnection alive for the next start. Do not nil it here:
+        // its deinit calls srt_cleanup() and can break the next session.
         await srtConnection?.close()
         srtStream = nil
-        srtConnection = nil
         #if canImport(RTMPHaishinKit)
         if let stream = rtmpStream {
             await mixer.removeOutput(stream)
